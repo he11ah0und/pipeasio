@@ -70,7 +70,7 @@ function(add_wine_dll)
         -Werror=implicit-function-declaration
         $<$<CONFIG:Release>:-O2 -DNDEBUG -fvisibility=hidden>
         $<$<CONFIG:RelWithDebInfo>:-O2 -g -DNDEBUG -fvisibility=hidden>
-        $<$<CONFIG:Debug>:-O0 -g3 -DDEBUG -fno-omit-frame-pointer>)
+        $<$<CONFIG:Debug>:-O0 -g3 -DDEBUG -fno-omit-frame-pointer -fstack-protector-all>)
 
     # Debug builds always get -O0 -g3 (from the CONFIG:Debug block above).
     # AddressSanitizer is opt-in via PIPEASIO_ASAN=ON because Wine's
