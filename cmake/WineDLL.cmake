@@ -82,7 +82,7 @@ function(add_wine_dll)
                 -E ${WDL_SPEC}
                 $<TARGET_OBJECTS:${_objlib}>
                 -o ${_pe}
-        DEPENDS ${_objlib} ${WDL_SPEC}
+        DEPENDS ${_objlib} ${WDL_SPEC} $<TARGET_OBJECTS:${_objlib}>
         COMMAND_EXPAND_LISTS
         VERBATIM
         COMMENT "winebuild ${WDL_NAME}.dll (fake PE module)")
@@ -99,7 +99,7 @@ function(add_wine_dll)
                 $<TARGET_OBJECTS:${_objlib}>
                 ${_lflags}
                 -o ${_so}
-        DEPENDS ${_objlib} ${WDL_SPEC}
+        DEPENDS ${_objlib} ${WDL_SPEC} $<TARGET_OBJECTS:${_objlib}>
         COMMAND_EXPAND_LISTS
         VERBATIM
         COMMENT "winegcc ${WDL_NAME}.dll.so (ELF shared object)")

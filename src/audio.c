@@ -15,6 +15,8 @@
  * License, or (at your option) any later version.
  */
 
+#define _GNU_SOURCE   /* memfd_create, MFD_CLOEXEC, SCHED_FIFO */
+
 #include "audio.h"
 
 #define WIN32_LEAN_AND_MEAN
@@ -33,7 +35,10 @@
 #define ERR(fmt, ...)      do { fprintf(stderr, "[pipeasio] " fmt, ##__VA_ARGS__); } while (0)
 
 #include <pipewire/pipewire.h>
+#include <spa/param/audio/format-utils.h>
+#include <spa/pod/builder.h>
 
+#include <errno.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdatomic.h>
@@ -41,6 +46,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(asio);
 
@@ -202,6 +209,29 @@ struct audio_client {
     void                       *latency_cb_arg;
 
     bool                        active;
+
+    /* --- M2: pw_filter + memfd buffer pool ---------------------------- */
+
+    struct pw_filter           *filter;
+    struct spa_hook             filter_listener;
+
+    int                         memfd;            /* -1 when unallocated */
+    audio_sample_t             *memfd_map;        /* mmap'd view; NULL when unallocated */
+    size_t                      memfd_bytes;
+
+    /* Registered-port array.  audio_port_register appends; audio_activate
+     * walks this to build the filter, audio_deactivate frees it. */
+    audio_port_t              **ports;
+    uint32_t                    n_ports;
+    uint32_t                    cap_ports;
+
+    /* Half index (0 or 1) the host is reading/writing this cycle.
+     * Toggled by the process callback after the ASIO bufferSwitch runs. */
+    uint32_t                    current_half;
+
+    /* Last spa_io_position.clock.nsec — used by audio_transport_query. */
+    uint64_t                    last_clock_nsec;
+    uint64_t                    last_clock_position;
 };
 
 struct audio_port {
@@ -209,9 +239,43 @@ struct audio_port {
     char                  *name;
     char                  *type;
     uint64_t               flags;
-    uint32_t               channel_idx;
-    audio_latency_range_t  latency[2];   /* [CAPTURE, PLAYBACK] */
+    uint32_t               channel_idx;          /* index into memfd layout */
+    audio_latency_range_t  latency[2];           /* [CAPTURE, PLAYBACK] */
+
+    /* --- M2: PipeWire port handle + memfd offsets --------------------- */
+
+    enum pw_direction      direction;
+    void                  *pw_filter_port;       /* returned by pw_filter_add_port */
+    size_t                 mapoffset[2];         /* byte offsets into memfd for halves 0/1 */
+    struct pw_buffer      *pw_buffer[2];         /* set by add_buffer events */
 };
+
+/* per-port userdata block stored by pw_filter_add_port — holds a pointer
+ * back to our audio_port so the filter events can find it. */
+typedef audio_port_t *audio_port_ref_t;
+
+/* --- Forward decls for filter events ------------------------------------ */
+
+static void audio_on_state_changed(void *userdata, enum pw_filter_state old,
+                                   enum pw_filter_state state, const char *error);
+static void audio_on_io_changed(void *userdata, void *port_data, uint32_t id,
+                                void *area, uint32_t size);
+static void audio_on_add_buffer(void *userdata, void *port_data,
+                                struct pw_buffer *buffer);
+static void audio_on_remove_buffer(void *userdata, void *port_data,
+                                   struct pw_buffer *buffer);
+static void audio_on_process(void *userdata, struct spa_io_position *position);
+
+static const struct pw_filter_events audio_filter_events = {
+    PW_VERSION_FILTER_EVENTS,
+    .state_changed = audio_on_state_changed,
+    .io_changed    = audio_on_io_changed,
+    .add_buffer    = audio_on_add_buffer,
+    .remove_buffer = audio_on_remove_buffer,
+    .process       = audio_on_process,
+};
+
+static void audio_teardown_filter(audio_client_t *c);
 
 /* ----------------------------------------------------------------------
  * Lifecycle
@@ -232,6 +296,7 @@ audio_client_t *audio_open(const char *client_name, uint32_t options, uint32_t *
     c->name        = strdup(client_name ? client_name : "PipeASIO");
     c->sample_rate = AUDIO_M1_DEFAULT_SAMPLE_RATE;
     c->buffer_size = AUDIO_M1_DEFAULT_BUFFER_SIZE;
+    c->memfd       = -1;
     atomic_init(&c->rt.ready, false);
 
     pw_init(NULL, NULL);
@@ -289,6 +354,11 @@ bool audio_close(audio_client_t *c)
 {
     if (!c) return false;
 
+    /* Tear down the filter + memfd first so its destruction sees a live
+     * thread loop / core to deliver events on. */
+    if (c->active)
+        audio_teardown_filter(c);
+
     if (c->loop) {
         pw_thread_loop_lock(c->loop);
         if (c->core) {
@@ -301,24 +371,189 @@ bool audio_close(audio_client_t *c)
     if (c->ctx)  pw_context_destroy(c->ctx);
     if (c->loop) pw_thread_loop_destroy(c->loop);
 
+    /* Free port array and any still-registered audio_port_t.  asio.c is
+     * supposed to call audio_port_unregister for each port before closing,
+     * but defend against leaks. */
+    for (uint32_t i = 0; i < c->n_ports; i++) {
+        audio_port_t *p = c->ports[i];
+        free(p->name);
+        free(p->type);
+        free(p);
+    }
+    free(c->ports);
+
     free(c->name);
     free(c);
     return true;
 }
 
+/* Helper — tear down the pw_filter, memfd, and per-port resources.
+ * Safe to call multiple times; clears all state to "not active". */
+static void audio_teardown_filter(audio_client_t *c)
+{
+    if (c->filter) {
+        pw_thread_loop_lock(c->loop);
+        pw_filter_destroy(c->filter);
+        c->filter = NULL;
+        pw_thread_loop_unlock(c->loop);
+    }
+    if (c->memfd_map && c->memfd_bytes) {
+        munmap(c->memfd_map, c->memfd_bytes);
+    }
+    c->memfd_map   = NULL;
+    c->memfd_bytes = 0;
+    if (c->memfd >= 0) {
+        close(c->memfd);
+        c->memfd = -1;
+    }
+    for (uint32_t i = 0; i < c->n_ports; i++) {
+        audio_port_t *p = c->ports[i];
+        p->pw_filter_port = NULL;
+        p->pw_buffer[0]   = NULL;
+        p->pw_buffer[1]   = NULL;
+        p->mapoffset[0]   = 0;
+        p->mapoffset[1]   = 0;
+    }
+    c->current_half = 0;
+}
+
 bool audio_activate(audio_client_t *c)
 {
     if (!c) return false;
-    /* M1 stub.  M2 builds a pw_filter with N inputs + M outputs, memfd-
-     * backed DSP buffers, FORCE_QUANTUM / FORCE_RATE properties, and
-     * connects it. */
+    if (c->active) return true;
+    if (!c->n_ports) {
+        ERR("audio_activate called with no ports registered\n");
+        return false;
+    }
+
+    const size_t bsize_samples = c->buffer_size;
+    const size_t bsize_bytes   = bsize_samples * sizeof(audio_sample_t);
+    const size_t total_bytes   = c->n_ports * 2 * bsize_bytes;
+
+    /* Allocate the memfd that backs every DSP buffer.  Layout:
+     *   [ch0 half0][ch0 half1][ch1 half0][ch1 half1]...  */
+    c->memfd = memfd_create("pipeasio-buffers", MFD_CLOEXEC);
+    if (c->memfd < 0) {
+        ERR("memfd_create failed: %s\n", strerror(errno));
+        goto fail;
+    }
+    if (ftruncate(c->memfd, (off_t)total_bytes) < 0) {
+        ERR("ftruncate(%zu) failed: %s\n", total_bytes, strerror(errno));
+        goto fail;
+    }
+    void *map = mmap(NULL, total_bytes, PROT_READ | PROT_WRITE, MAP_SHARED,
+                     c->memfd, 0);
+    if (map == MAP_FAILED) {
+        ERR("mmap(%zu) failed: %s\n", total_bytes, strerror(errno));
+        goto fail;
+    }
+    c->memfd_map   = map;
+    c->memfd_bytes = total_bytes;
+
+    /* Pre-compute per-port mapoffsets. */
+    for (uint32_t i = 0; i < c->n_ports; i++) {
+        audio_port_t *p   = c->ports[i];
+        p->channel_idx    = i;
+        p->mapoffset[0]   = (size_t)(i * 2 + 0) * bsize_bytes;
+        p->mapoffset[1]   = (size_t)(i * 2 + 1) * bsize_bytes;
+        p->pw_buffer[0]   = NULL;
+        p->pw_buffer[1]   = NULL;
+    }
+
+    /* Build the filter's node-level properties.  FORCE_QUANTUM/RATE lock
+     * the PipeWire graph to the ASIO host's negotiated buffer size and
+     * the configured sample rate. */
+    struct pw_properties *filter_props = pw_properties_new(
+        PW_KEY_NODE_NAME,            c->name,
+        PW_KEY_NODE_DESCRIPTION,     c->name,
+        PW_KEY_MEDIA_TYPE,           "Audio",
+        PW_KEY_MEDIA_CATEGORY,       "Duplex",
+        PW_KEY_MEDIA_ROLE,           "DSP",
+        PW_KEY_NODE_ALWAYS_PROCESS,  "true",
+        NULL);
+    if (!filter_props) {
+        ERR("pw_properties_new (filter) failed\n");
+        goto fail;
+    }
+    pw_properties_setf(filter_props, PW_KEY_NODE_FORCE_QUANTUM, "%u", (unsigned)bsize_samples);
+    pw_properties_setf(filter_props, PW_KEY_NODE_FORCE_RATE,    "%u", (unsigned)c->sample_rate);
+    pw_properties_setf(filter_props, PW_KEY_NODE_LATENCY,       "%u/%u",
+                       (unsigned)bsize_samples, (unsigned)c->sample_rate);
+
+    pw_thread_loop_lock(c->loop);
+
+    c->filter = pw_filter_new_simple(pw_thread_loop_get_loop(c->loop),
+                                     c->name, filter_props,
+                                     &audio_filter_events, c);
+    if (!c->filter) {
+        pw_thread_loop_unlock(c->loop);
+        ERR("pw_filter_new_simple failed\n");
+        goto fail;
+    }
+
+    /* Add every registered port to the filter.  The format param locks the
+     * port to F32 DSP mono; the buffers param locks to 2 memfd-backed
+     * buffers sized for one half of the memfd each.  pwasio uses the same
+     * shape (src/pwasio.c:1303-1320), this is just the standard recipe. */
+    for (uint32_t i = 0; i < c->n_ports; i++) {
+        audio_port_t *p = c->ports[i];
+
+        struct pw_properties *pp = pw_properties_new(NULL, NULL);
+        if (!pp) {
+            pw_thread_loop_unlock(c->loop);
+            ERR("pw_properties_new (port %u) failed\n", i);
+            goto fail;
+        }
+        pw_properties_set(pp, PW_KEY_FORMAT_DSP, "32 bit float mono audio");
+        pw_properties_set(pp, PW_KEY_PORT_NAME, p->name);
+
+        uint8_t param_buf[1024];
+        struct spa_pod_builder b = SPA_POD_BUILDER_INIT(param_buf, sizeof param_buf);
+        const struct spa_pod *params[] = {
+            spa_pod_builder_add_object(&b,
+                SPA_TYPE_OBJECT_ParamBuffers, SPA_PARAM_Buffers,
+                SPA_PARAM_BUFFERS_buffers,  SPA_POD_Int(2),
+                SPA_PARAM_BUFFERS_size,     SPA_POD_Int((int)bsize_bytes),
+                SPA_PARAM_BUFFERS_stride,   SPA_POD_Int(sizeof(audio_sample_t)),
+                SPA_PARAM_BUFFERS_align,    SPA_POD_Int((int)bsize_bytes),
+                SPA_PARAM_BUFFERS_dataType, SPA_POD_CHOICE_FLAGS_Int(1 << SPA_DATA_MemFd)),
+        };
+
+        p->pw_filter_port = pw_filter_add_port(c->filter, p->direction,
+                                               PW_FILTER_PORT_FLAG_ALLOC_BUFFERS,
+                                               sizeof(audio_port_ref_t),
+                                               pp, params, SPA_N_ELEMENTS(params));
+        if (!p->pw_filter_port) {
+            pw_thread_loop_unlock(c->loop);
+            ERR("pw_filter_add_port failed for port %u (%s)\n", i, p->name);
+            goto fail;
+        }
+        *(audio_port_ref_t *)p->pw_filter_port = p;
+    }
+
+    if (pw_filter_connect(c->filter, PW_FILTER_FLAG_NONE, NULL, 0) < 0) {
+        pw_thread_loop_unlock(c->loop);
+        ERR("pw_filter_connect failed\n");
+        goto fail;
+    }
+
+    pw_thread_loop_unlock(c->loop);
+
     c->active = true;
+    TRACE("audio_activate: %u ports, %u-sample buffers, %u Hz\n",
+          c->n_ports, c->buffer_size, c->sample_rate);
     return true;
+
+fail:
+    audio_teardown_filter(c);
+    return false;
 }
 
 bool audio_deactivate(audio_client_t *c)
 {
     if (!c) return false;
+    if (!c->active) return true;
+    audio_teardown_filter(c);
     c->active = false;
     return true;
 }
@@ -364,23 +599,43 @@ audio_port_t *audio_port_register(audio_client_t *c,
                                   const char *port_name, const char *port_type,
                                   uint64_t flags, uint64_t buffer_size)
 {
-    (void)buffer_size;
+    (void)buffer_size;   /* asio.c passes the channel index here, not a size */
     if (!c || !port_name) return NULL;
 
     audio_port_t *p = calloc(1, sizeof(*p));
     if (!p) return NULL;
 
-    p->client = c;
-    p->name   = strdup(port_name);
-    p->type   = strdup(port_type ? port_type : AUDIO_DEFAULT_TYPE);
-    p->flags  = flags;
+    p->client      = c;
+    p->name        = strdup(port_name);
+    p->type        = strdup(port_type ? port_type : AUDIO_DEFAULT_TYPE);
+    p->flags       = flags;
+    p->channel_idx = c->n_ports;
+    p->direction   = (flags & AUDIO_PORT_IS_INPUT) ? PW_DIRECTION_INPUT
+                                                   : PW_DIRECTION_OUTPUT;
+
+    if (c->n_ports == c->cap_ports) {
+        uint32_t new_cap = c->cap_ports ? c->cap_ports * 2 : 16;
+        audio_port_t **grown = realloc(c->ports, new_cap * sizeof(*grown));
+        if (!grown) { free(p->name); free(p->type); free(p); return NULL; }
+        c->ports     = grown;
+        c->cap_ports = new_cap;
+    }
+    c->ports[c->n_ports++] = p;
     return p;
 }
 
 bool audio_port_unregister(audio_client_t *c, audio_port_t *p)
 {
-    (void)c;
-    if (!p) return false;
+    if (!c || !p) return false;
+    /* Remove from the client's array (compact in place). */
+    for (uint32_t i = 0; i < c->n_ports; i++) {
+        if (c->ports[i] == p) {
+            memmove(&c->ports[i], &c->ports[i + 1],
+                    (c->n_ports - i - 1) * sizeof(*c->ports));
+            c->n_ports--;
+            break;
+        }
+    }
     free(p->name);
     free(p->type);
     free(p);
@@ -389,10 +644,14 @@ bool audio_port_unregister(audio_client_t *c, audio_port_t *p)
 
 void *audio_port_get_buffer(audio_port_t *p, audio_nframes_t nframes)
 {
-    (void)p; (void)nframes;
-    /* M2 returns a pointer into the memfd-mapped region for this port's
-     * current buffer half. */
-    return NULL;
+    (void)nframes;   /* always == client->buffer_size when the filter is running */
+    if (!p) return NULL;
+    audio_client_t *c = p->client;
+    if (!c || !c->memfd_map) return NULL;
+
+    /* Memfd layout: channel 0 half 0 | channel 0 half 1 | channel 1 half 0 | ...
+     * memfd_map is a float pointer, so we index in samples (not bytes). */
+    return c->memfd_map + (p->channel_idx * 2 + c->current_half) * c->buffer_size;
 }
 
 const char *audio_port_name(const audio_port_t *p) { return p ? p->name : NULL; }
@@ -492,4 +751,121 @@ uint32_t audio_transport_query(const audio_client_t *c, audio_position_t *pos)
 void audio_free(void *ptr)
 {
     free(ptr);
+}
+
+/* ----------------------------------------------------------------------
+ * Filter event callbacks — fire on the PipeWire data thread.  Because the
+ * data thread was spawned by our audio_rt_create, it is a real Wine
+ * thread; calling back into asio.c's process_cb (which then calls the
+ * host's ASIO COM bufferSwitch) is safe.
+ * ---------------------------------------------------------------------- */
+
+static void audio_on_state_changed(void *userdata, enum pw_filter_state old,
+                                   enum pw_filter_state state, const char *error)
+{
+    audio_client_t *c = userdata;
+    (void)old; (void)c;
+    if (state == PW_FILTER_STATE_ERROR && error)
+        ERR("pw_filter entered ERROR state: %s\n", error);
+}
+
+static void audio_on_io_changed(void *userdata, void *port_data, uint32_t id,
+                                void *area, uint32_t size)
+{
+    audio_client_t *c = userdata;
+    (void)port_data;
+    if (id == SPA_IO_Position && area && size >= sizeof(struct spa_io_position)) {
+        const struct spa_io_position *pos = area;
+        /* spa_fraction (num, denom): for an audio graph num=1 and denom is
+         * the sample rate in Hz, so we just take denom. */
+        audio_nframes_t new_rate = pos->clock.rate.denom
+            ? pos->clock.rate.denom : c->sample_rate;
+        if (new_rate && new_rate != c->sample_rate) {
+            c->sample_rate = new_rate;
+            if (c->sample_rate_cb)
+                c->sample_rate_cb(new_rate, c->sample_rate_cb_arg);
+        }
+    }
+}
+
+static void audio_on_add_buffer(void *userdata, void *port_data,
+                                struct pw_buffer *buffer)
+{
+    audio_client_t *c = userdata;
+    audio_port_t   *p = *(audio_port_ref_t *)port_data;
+
+    struct spa_data *d = &buffer->buffer->datas[0];
+
+    /* Slot in either half 0 or 1 — PipeWire calls add_buffer once per
+     * allocated buffer per port (we requested 2 via SPA_PARAM_Buffers). */
+    int half = -1;
+    if (!p->pw_buffer[0])      half = 0;
+    else if (!p->pw_buffer[1]) half = 1;
+    else {
+        WARN("pw_filter handed us a 3rd buffer for port %u (%s); ignoring\n",
+             p->channel_idx, p->name);
+        return;
+    }
+    p->pw_buffer[half] = buffer;
+
+    d->type      = SPA_DATA_MemFd;
+    d->flags     = SPA_DATA_FLAG_READWRITE | SPA_DATA_FLAG_MAPPABLE;
+    d->fd        = c->memfd;
+    d->mapoffset = p->mapoffset[half];
+    d->maxsize   = c->buffer_size * sizeof(audio_sample_t);
+}
+
+static void audio_on_remove_buffer(void *userdata, void *port_data,
+                                   struct pw_buffer *buffer)
+{
+    (void)userdata;
+    audio_port_t *p = *(audio_port_ref_t *)port_data;
+    if (buffer == p->pw_buffer[0]) p->pw_buffer[0] = NULL;
+    if (buffer == p->pw_buffer[1]) p->pw_buffer[1] = NULL;
+}
+
+static void audio_on_process(void *userdata, struct spa_io_position *position)
+{
+    audio_client_t *c = userdata;
+
+    if (position) {
+        c->last_clock_nsec     = position->clock.nsec;
+        c->last_clock_position = position->clock.position;
+    }
+
+    /* Dequeue the cycle's buffer for every port — this consumes whatever
+     * PipeWire had presented to us. */
+    for (uint32_t i = 0; i < c->n_ports; i++) {
+        audio_port_t *p = c->ports[i];
+        if (p->pw_filter_port)
+            pw_filter_dequeue_buffer(p->pw_filter_port);
+    }
+
+    /* Run the ASIO host's process callback.  audio_port_get_buffer reads
+     * c->current_half to find the right memfd slice. */
+    if (c->process_cb)
+        c->process_cb(c->buffer_size, c->process_cb_arg);
+
+    /* Queue buffer[current_half] for each port.  For output ports, also
+     * set the chunk metadata so PipeWire knows the byte count. */
+    const uint32_t half = c->current_half;
+    const uint32_t bytes_this_cycle =
+        (position ? position->clock.duration : c->buffer_size) * sizeof(audio_sample_t);
+
+    for (uint32_t i = 0; i < c->n_ports; i++) {
+        audio_port_t *p   = c->ports[i];
+        struct pw_buffer *b = p->pw_buffer[half];
+        if (!b || !p->pw_filter_port)
+            continue;
+        if (p->direction == PW_DIRECTION_OUTPUT) {
+            struct spa_data *d = &b->buffer->datas[0];
+            d->chunk->offset = 0;
+            d->chunk->size   = bytes_this_cycle;
+            d->chunk->stride = sizeof(audio_sample_t);
+            d->chunk->flags  = 0;
+        }
+        pw_filter_queue_buffer(p->pw_filter_port, b);
+    }
+
+    c->current_half ^= 1;
 }
