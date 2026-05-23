@@ -65,7 +65,6 @@ function(add_wine_dll)
         -D_REENTRANT
         -Wall -pipe
         -fno-strict-aliasing
-        -Wdeclaration-after-statement
         -Wwrite-strings
         -Wpointer-arith
         -Werror=implicit-function-declaration

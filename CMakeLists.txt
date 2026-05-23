@@ -13,10 +13,9 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
-# libpipewire-0.3 is required at configure time so the dev environment is
-# verified up-front, even though it is not linked into the DLL yet.  Phase 3
-# replaces src/audio.c's body with real PipeWire code; src/audio.c will then
-# add target_link_libraries(wineasio64_objs PRIVATE ${PIPEWIRE_LIBRARIES}).
+# libpipewire-0.3 backs src/audio.c — its headers feed the OBJECT lib
+# compile step via INCLUDES, and -lpipewire-0.3 reaches the winegcc link
+# step via LIBS.
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
 message(STATUS "Found libpipewire-0.3 ${PIPEWIRE_VERSION}")
@@ -28,9 +27,9 @@ add_wine_dll(
     SPEC      ${CMAKE_SOURCE_DIR}/wineasio.dll.spec
     SOURCES   src/asio.c
               src/audio.c
-              src/jackbridge.c
               src/main.c
               src/regsvr.c
     INCLUDES  ${CMAKE_SOURCE_DIR}/include
-    LIBS      odbc32 ole32 uuid winmm
+              ${PIPEWIRE_INCLUDE_DIRS}
+    LIBS      odbc32 ole32 uuid winmm pipewire-0.3
 )

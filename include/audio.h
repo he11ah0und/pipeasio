@@ -1,33 +1,48 @@
 /*
- * audio.h — backend-agnostic audio API surface for WineASIO.
+ * audio.h — backend-agnostic audio API surface for PipeASIO.
  *
- * Phase 1: opaque types and flag macros are aliases over the existing
- * jackbridge.h declarations, and src/audio.c forwards every call into
- * the libjack-backed jackbridge implementation.  asio.c sees only this
- * header — JACK terminology is encapsulated below this line.
- *
- * Phase 3 will replace the typedefs with native libpipewire-backed
- * structs and rewrite src/audio.c on top of pw_thread_loop + pw_filter,
- * without touching asio.c.  Phase 4 deletes jackbridge entirely.
+ * Implemented natively on libpipewire-0.3 in src/audio.c: a single
+ * pw_thread_loop drives a pw_filter, with custom spa_thread_utils
+ * bridging the PipeWire RT thread to Wine via CreateThread.  asio.c
+ * sees only this header — PipeWire terminology is encapsulated below
+ * this line.
  */
 #pragma once
-
-#include "jackbridge.h"
 
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 
-/* --- Opaque types (transitional aliases) -------------------------------- */
+/* --- Opaque handle types ------------------------------------------------ */
 
-typedef jack_client_t                audio_client_t;
-typedef jack_port_t                  audio_port_t;
-typedef jack_position_t              audio_position_t;
-typedef jack_latency_range_t         audio_latency_range_t;
-typedef jack_nframes_t               audio_nframes_t;
-typedef jack_default_audio_sample_t  audio_sample_t;
-typedef jack_latency_callback_mode_t audio_latency_mode_t;
-typedef jack_transport_state_t       audio_transport_state_t;
+typedef struct audio_client audio_client_t;
+typedef struct audio_port   audio_port_t;
+
+/* --- Concrete value types ----------------------------------------------- */
+
+typedef uint32_t audio_nframes_t;
+typedef float    audio_sample_t;
+
+typedef struct {
+    audio_nframes_t min;
+    audio_nframes_t max;
+} audio_latency_range_t;
+
+typedef struct {
+    audio_nframes_t frame;       /* current playback frame */
+    uint64_t        usecs;       /* wall-clock microseconds */
+    audio_nframes_t frame_rate;  /* sample rate */
+} audio_position_t;
+
+typedef enum {
+    AUDIO_CAPTURE_LATENCY  = 0,
+    AUDIO_PLAYBACK_LATENCY = 1,
+} audio_latency_mode_t;
+
+typedef enum {
+    AUDIO_TRANSPORT_STOPPED = 0,
+    AUDIO_TRANSPORT_ROLLING = 1,
+} audio_transport_state_t;
 
 /* --- Callback signatures ------------------------------------------------ */
 
@@ -38,17 +53,18 @@ typedef void (*audio_latency_cb)    (audio_latency_mode_t mode, void *arg);
 typedef int  (*audio_thread_creator)(pthread_t *thread, const pthread_attr_t *attr,
                                      void *(*start)(void *), void *arg);
 
-/* --- Constants (transitional macros) ------------------------------------ */
+/* --- Constants ---------------------------------------------------------- */
 
-#define AUDIO_DEFAULT_TYPE       JACK_DEFAULT_AUDIO_TYPE
-#define AUDIO_PORT_IS_INPUT      JackPortIsInput
-#define AUDIO_PORT_IS_OUTPUT     JackPortIsOutput
-#define AUDIO_PORT_IS_PHYSICAL   JackPortIsPhysical
-#define AUDIO_CAPTURE_LATENCY    JackCaptureLatency
-#define AUDIO_PLAYBACK_LATENCY   JackPlaybackLatency
-#define AUDIO_NULL_OPTION        JackNullOption
-#define AUDIO_NO_START_SERVER    JackNoStartServer
-#define AUDIO_TRANSPORT_ROLLING  JackTransportRolling
+#define AUDIO_DEFAULT_TYPE       "32 bit float mono audio"
+
+/* audio_open option flags */
+#define AUDIO_NULL_OPTION        0x00u
+#define AUDIO_NO_START_SERVER    0x01u
+
+/* audio_port_register / audio_get_ports flag bits */
+#define AUDIO_PORT_IS_INPUT      0x01u
+#define AUDIO_PORT_IS_OUTPUT     0x02u
+#define AUDIO_PORT_IS_PHYSICAL   0x04u
 
 /* --- Lifecycle ---------------------------------------------------------- */
 
