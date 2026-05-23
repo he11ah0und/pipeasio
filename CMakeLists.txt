@@ -33,3 +33,8 @@ add_wine_dll(
               ${PIPEWIRE_INCLUDE_DIRS}
     LIBS      odbc32 ole32 uuid winmm pipewire-0.3
 )
+
+include(GNUInstallDirs)
+
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/pipeasio-register
+        DESTINATION ${CMAKE_INSTALL_BINDIR})
