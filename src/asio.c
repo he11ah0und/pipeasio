@@ -480,8 +480,10 @@ HIDDEN LONG STDMETHODCALLTYPE Init(LPPIPEASIO iface, void *sysRef)
     This->host_sample_rate = audio_get_sample_rate(This->jack_client);
     This->host_current_buffersize = audio_get_buffer_size(This->jack_client);
 
-    /* Allocate IOChannel structures */
-    This->input_channel = HeapAlloc(GetProcessHeap(), 0, (This->pipeasio_number_inputs + This->pipeasio_number_outputs) * sizeof(IOChannel));
+    /* Allocate IOChannel structures (zeroed — audio_buffer and active
+     * must start NULL/false before CreateBuffers wires them up). */
+    This->input_channel = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                    (This->pipeasio_number_inputs + This->pipeasio_number_outputs) * sizeof(IOChannel));
     if (!This->input_channel)
     {
         audio_close(This->jack_client);
@@ -636,6 +638,7 @@ HIDDEN LONG STDMETHODCALLTYPE Start(LPPIPEASIO iface)
 
     if (This->host_time_info_mode) /* use the newer swapBuffersWithTimeInfo method if supported */
     {
+        This->host_time._2 = 1.0;  /* ASIOTime.timeInfo.speed — normal-rate playback */
         This->host_time.numSamples.lo = This->host_time.numSamples.hi = 0;
         This->host_time.timeStamp.lo = This->host_time_stamp.lo;
         This->host_time.timeStamp.hi = This->host_time_stamp.hi;
@@ -650,7 +653,7 @@ HIDDEN LONG STDMETHODCALLTYPE Start(LPPIPEASIO iface)
             This->host_time.flagsForTimeCode = ~(0x3);
         }
         This->host_callbacks->swapBuffersWithTimeInfo(&This->host_time, This->host_buffer_index, 1);
-    } 
+    }
     else
     { /* use the old swapBuffers method */
         This->host_callbacks->swapBuffers(This->host_buffer_index, 1);
@@ -956,14 +959,25 @@ HIDDEN LONG STDMETHODCALLTYPE CreateBuffers(LPPIPEASIO iface, BufferInformation 
     if (!bufferInfo || !callbacks)
         return -997;
 
-    /* Check for invalid channel numbers */
+    /* Check for invalid channel numbers.  Both the count-per-direction
+     * AND each entry's channelNumber must be in range — without the
+     * latter, a host that passes channelNumber=99 walks straight off
+     * input_channel[]/output_channel[] into adjacent heap. */
     for (i = j = k = 0; i < numChannels; i++, bufferInfoPerChannel++)
     {
         if (bufferInfoPerChannel->isInputType)
         {
             if (j++ >= This->pipeasio_number_inputs)
             {
-                WARN("Invalid input channel requested\n");
+                WARN("Invalid input channel requested (too many)\n");
+                return -997;
+            }
+            if (bufferInfoPerChannel->channelNumber < 0
+                || bufferInfoPerChannel->channelNumber >= This->pipeasio_number_inputs)
+            {
+                WARN("Invalid input channelNumber %ld (max %d)\n",
+                     (long)bufferInfoPerChannel->channelNumber,
+                     This->pipeasio_number_inputs - 1);
                 return -997;
             }
         }
@@ -971,7 +985,15 @@ HIDDEN LONG STDMETHODCALLTYPE CreateBuffers(LPPIPEASIO iface, BufferInformation 
         {
             if (k++  >= This->pipeasio_number_outputs)
             {
-                WARN("Invalid output channel requested\n");
+                WARN("Invalid output channel requested (too many)\n");
+                return -997;
+            }
+            if (bufferInfoPerChannel->channelNumber < 0
+                || bufferInfoPerChannel->channelNumber >= This->pipeasio_number_outputs)
+            {
+                WARN("Invalid output channelNumber %ld (max %d)\n",
+                     (long)bufferInfoPerChannel->channelNumber,
+                     This->pipeasio_number_outputs - 1);
                 return -997;
             }
         }
@@ -1002,7 +1024,7 @@ HIDDEN LONG STDMETHODCALLTYPE CreateBuffers(LPPIPEASIO iface, BufferInformation 
             else
             {
                 This->host_current_buffersize = bufferSize;
-                if (audio_set_buffer_size(This->jack_client, This->host_current_buffersize))
+                if (!audio_set_buffer_size(This->jack_client, This->host_current_buffersize))
                 {
                     WARN("JACK is unable to set buffersize to %d\n", (int)This->host_current_buffersize);
                     return -999;
@@ -1033,9 +1055,11 @@ HIDDEN LONG STDMETHODCALLTYPE CreateBuffers(LPPIPEASIO iface, BufferInformation 
         ERR("Unable to allocate %i audio buffers\n", This->pipeasio_number_inputs + This->pipeasio_number_outputs);
         return -994;
     }
-    TRACE("%i audio buffers allocated (%zu kB)\n",
+    TRACE("%i audio buffers allocated (%zu kB) base=%p end=%p\n",
           This->pipeasio_number_inputs + This->pipeasio_number_outputs,
-          cb_bytes / 1024);
+          cb_bytes / 1024,
+          This->callback_audio_buffer,
+          (void *)((char *)This->callback_audio_buffer + cb_bytes));
 
     for (i = 0; i < This->pipeasio_number_inputs; i++)
         This->input_channel[i].audio_buffer = This->callback_audio_buffer
@@ -1058,24 +1082,37 @@ HIDDEN LONG STDMETHODCALLTYPE CreateBuffers(LPPIPEASIO iface, BufferInformation 
 
     for (i = 0; i < numChannels; i++, bufferInfoPerChannel++)
     {
+        const LONG ch = bufferInfoPerChannel->channelNumber;
         if (bufferInfoPerChannel->isInputType)
         {
-            bufferInfoPerChannel->audioBufferStart = &This->input_channel[bufferInfoPerChannel->channelNumber].audio_buffer[0];
-            bufferInfoPerChannel->audioBufferEnd = &This->input_channel[bufferInfoPerChannel->channelNumber].audio_buffer[This->host_current_buffersize];
-            This->input_channel[bufferInfoPerChannel->channelNumber].active = true;
+            bufferInfoPerChannel->audioBufferStart = &This->input_channel[ch].audio_buffer[0];
+            bufferInfoPerChannel->audioBufferEnd = &This->input_channel[ch].audio_buffer[This->host_current_buffersize];
+            This->input_channel[ch].active = true;
             This->host_active_inputs++;
-            /* TRACE("ASIO audio buffer for channel %i as input %li created\n", i, This->host_active_inputs); */
+            TRACE("  bufferInfo[%d]: IN  ch=%ld start=%p end=%p (cb_offset=%zu)\n",
+                  i, (long)ch,
+                  bufferInfoPerChannel->audioBufferStart,
+                  bufferInfoPerChannel->audioBufferEnd,
+                  (size_t)((char *)bufferInfoPerChannel->audioBufferStart
+                           - (char *)This->callback_audio_buffer));
         }
         else
         {
-            bufferInfoPerChannel->audioBufferStart = &This->output_channel[bufferInfoPerChannel->channelNumber].audio_buffer[0];
-            bufferInfoPerChannel->audioBufferEnd = &This->output_channel[bufferInfoPerChannel->channelNumber].audio_buffer[This->host_current_buffersize];
-            This->output_channel[bufferInfoPerChannel->channelNumber].active = true;
+            bufferInfoPerChannel->audioBufferStart = &This->output_channel[ch].audio_buffer[0];
+            bufferInfoPerChannel->audioBufferEnd = &This->output_channel[ch].audio_buffer[This->host_current_buffersize];
+            This->output_channel[ch].active = true;
             This->host_active_outputs++;
-            /* TRACE("ASIO audio buffer for channel %i as output %li created\n", i, This->host_active_outputs); */
+            TRACE("  bufferInfo[%d]: OUT ch=%ld start=%p end=%p (cb_offset=%zu)\n",
+                  i, (long)ch,
+                  bufferInfoPerChannel->audioBufferStart,
+                  bufferInfoPerChannel->audioBufferEnd,
+                  (size_t)((char *)bufferInfoPerChannel->audioBufferStart
+                           - (char *)This->callback_audio_buffer));
         }
     }
-    TRACE("%d audio channels initialized\n", (int)(This->host_active_inputs + This->host_active_outputs));
+    TRACE("%d audio channels initialized (active_in=%d active_out=%d)\n",
+          (int)(This->host_active_inputs + This->host_active_outputs),
+          This->host_active_inputs, This->host_active_outputs);
 
     if (!audio_activate(This->jack_client))
         return -1000;
@@ -1084,11 +1121,17 @@ HIDDEN LONG STDMETHODCALLTYPE CreateBuffers(LPPIPEASIO iface, BufferInformation 
     if (This->pipeasio_connect_to_hardware)
     {
         for (i = 0; i < This->jack_num_input_ports && i < This->pipeasio_number_inputs; i++)
-            if (strstr(audio_port_type(audio_port_by_name(This->jack_client, This->jack_input_ports[i])), "audio"))
+        {
+            const char *type = audio_port_type(audio_port_by_name(This->jack_client, This->jack_input_ports[i]));
+            if (type && strstr(type, "audio"))
                 audio_connect(This->jack_client, This->jack_input_ports[i], audio_port_name(This->input_channel[i].port));
+        }
         for (i = 0; i < This->jack_num_output_ports && i < This->pipeasio_number_outputs; i++)
-            if (strstr(audio_port_type(audio_port_by_name(This->jack_client, This->jack_output_ports[i])), "audio"))
+        {
+            const char *type = audio_port_type(audio_port_by_name(This->jack_client, This->jack_output_ports[i]));
+            if (type && strstr(type, "audio"))
                 audio_connect(This->jack_client, audio_port_name(This->output_channel[i].port), This->jack_output_ports[i]);
+        }
     }
 
     /* at this point all the connections are made and the jack process callback is outputting silence */
@@ -1308,6 +1351,32 @@ static inline int jack_process_callback(audio_nframes_t nframes, void *arg)
         return 0;
     }
 
+    /* One-shot dump of the actual memcpy bounds we're about to use,
+     * so we can audit FL Studio's idea of the buffer layout vs. ours. */
+    static int diag_first_cycle_logged;
+    if (!diag_first_cycle_logged)
+    {
+        diag_first_cycle_logged = 1;
+        TRACE("first jack_process_callback: nframes=%u host_buffer_index=%d\n",
+              (unsigned)nframes, (int)This->host_buffer_index);
+        for (i = 0; i < This->pipeasio_number_inputs; i++)
+            if (This->input_channel[i].active)
+                TRACE("  in[%d] dst=%p .. %p (%zu bytes), audio_buffer base=%p\n",
+                      i,
+                      (void *)&This->input_channel[i].audio_buffer[nframes * This->host_buffer_index],
+                      (void *)(&This->input_channel[i].audio_buffer[nframes * This->host_buffer_index] + nframes),
+                      (size_t)nframes * sizeof(audio_sample_t),
+                      (void *)This->input_channel[i].audio_buffer);
+        for (i = 0; i < This->pipeasio_number_outputs; i++)
+            if (This->output_channel[i].active)
+                TRACE("  out[%d] src=%p .. %p (%zu bytes), audio_buffer base=%p\n",
+                      i,
+                      (void *)&This->output_channel[i].audio_buffer[nframes * This->host_buffer_index],
+                      (void *)(&This->output_channel[i].audio_buffer[nframes * This->host_buffer_index] + nframes),
+                      (size_t)nframes * sizeof(audio_sample_t),
+                      (void *)This->output_channel[i].audio_buffer);
+    }
+
     /* copy jack to host buffers */
     for (i = 0; i < This->pipeasio_number_inputs; i++)
         if (This->input_channel[i].active)
@@ -1338,6 +1407,7 @@ static inline int jack_process_callback(audio_nframes_t nframes, void *arg)
 
     if (This->host_time_info_mode) /* use the newer swapBuffersWithTimeInfo method if supported */
     {
+        This->host_time._2 = 1.0;  /* ASIOTime.timeInfo.speed — normal-rate playback */
         This->host_time.numSamples.lo = This->host_num_samples.lo;
         This->host_time.numSamples.hi = This->host_num_samples.hi;
         This->host_time.timeStamp.lo = This->host_time_stamp.lo;
@@ -1653,7 +1723,13 @@ HRESULT WINAPI PipeASIOCreateInstance(REFIID riid, LPVOID *ppobj)
 
     /* TRACE("riid: %s, ppobj: %p\n", debugstr_guid(riid), ppobj); */
 
-    pobj = HeapAlloc(GetProcessHeap(), 0, sizeof(*pobj));
+    /* HEAP_ZERO_MEMORY (0x8) is critical: the struct holds host-facing
+     * state like host_time.speed (a double the ASIO host may read even
+     * when we don't flag it kSpeedValid).  Allocating with random bytes
+     * makes the host see uninitialized doubles — NaN/Inf — and apply
+     * them as gain/rate multipliers, which sounds like noise and can
+     * trip downstream FPU exceptions deep inside the host's engine. */
+    pobj = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*pobj));
     if (pobj == NULL)
     {
         WARN("out of memory\n");

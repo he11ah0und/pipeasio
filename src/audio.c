@@ -247,6 +247,7 @@ struct audio_client {
     struct pw_thread_loop      *loop;
     struct pw_context          *ctx;
     struct pw_core             *core;
+    struct pw_data_loop        *data_loop;
 
     struct audio_rt_state       rt;
     struct spa_thread_utils     rt_iface;
@@ -328,6 +329,7 @@ struct audio_port {
     void                  *pw_filter_port;       /* returned by pw_filter_add_port */
     size_t                 mapoffset[2];         /* byte offsets into memfd for halves 0/1 */
     struct pw_buffer      *pw_buffer[2];         /* set by add_buffer events */
+    struct pw_buffer      *cycle_buffer;         /* buffer dequeued for this cycle, NULL if none */
 
     /* --- M3: PipeWire registry IDs (for audio_connect link-factory) -- */
 
@@ -471,7 +473,18 @@ audio_client_t *audio_open(const char *client_name, uint32_t options, uint32_t *
     void *got = pw_context_get_object(c->ctx, SPA_TYPE_INTERFACE_ThreadUtils);
     TRACE("pw_context_set_object(ThreadUtils) rc=%d got=%p (expected %p)\n",
           set_rc, got, (void *)&c->rt_iface);
-    pw_data_loop_set_thread_utils(pw_context_get_data_loop(c->ctx), &c->rt_iface);
+    c->data_loop = pw_context_get_data_loop(c->ctx);
+    pw_data_loop_set_thread_utils(c->data_loop, &c->rt_iface);
+
+    /* pw_context_new already started the data loop with the DEFAULT
+     * (plain-pthread) thread utils.  Installing our override now only
+     * affects the NEXT start, so stop the data loop here and restart it
+     * below — then its RT thread is allocated through audio_rt_create
+     * (Win32 CreateThread) and has a real Wine TEB.  Without this dance
+     * the override is dead: the process() callback runs on a foreign
+     * pthread and the ASIO host's COM bufferSwitch corrupts memory.
+     * (Mirrors pwasio's stop/restart sequence.) */
+    pw_data_loop_stop(c->data_loop);
 
     if (pw_thread_loop_start(c->loop) < 0) {
         ERR("pw_thread_loop_start failed\n");
@@ -579,6 +592,15 @@ bool audio_close(audio_client_t *c)
  * Safe to call multiple times; clears all state to "not active". */
 static void audio_teardown_filter(audio_client_t *c)
 {
+    /* Stop the RT data loop before destroying the filter it processes.
+     * Paired with the pw_data_loop_start in audio_activate so re-activation
+     * (DisposeBuffers -> CreateBuffers) starts from a stopped loop, exactly
+     * like the first activation. */
+    if (c->data_loop && c->loop) {
+        pw_thread_loop_lock(c->loop);
+        pw_data_loop_stop(c->data_loop);
+        pw_thread_loop_unlock(c->loop);
+    }
     if (c->filter) {
         pw_thread_loop_lock(c->loop);
         pw_filter_destroy(c->filter);
@@ -671,7 +693,7 @@ bool audio_activate(audio_client_t *c)
 
     pw_thread_loop_lock(c->loop);
 
-    c->filter = pw_filter_new_simple(pw_thread_loop_get_loop(c->loop),
+    c->filter = pw_filter_new_simple(pw_data_loop_get_loop(c->data_loop),
                                      c->name, filter_props,
                                      &audio_filter_events, c);
     if (!c->filter) {
@@ -726,6 +748,21 @@ bool audio_activate(audio_client_t *c)
         goto fail;
     }
 
+    pw_thread_loop_unlock(c->loop);
+
+    /* Start the data loop now — AFTER add_port/connect.  Those run in the
+     * thread-loop context and fail "wrong context: not in loop" if the
+     * filter's (data) loop is already running, so it stayed stopped since
+     * audio_open.  Starting it here spawns the RT thread via
+     * audio_rt_create (Wine TEB) and lets the node bind below and schedule
+     * process() on that bridged thread.  (Mirrors pwasio: filter set up
+     * with the data loop stopped, started in Start().) */
+    pw_thread_loop_lock(c->loop);
+    if (pw_data_loop_start(c->data_loop) < 0) {
+        pw_thread_loop_unlock(c->loop);
+        ERR("pw_data_loop_start failed\n");
+        goto fail;
+    }
     pw_thread_loop_unlock(c->loop);
 
     /* Wait for the filter to bind: pw_filter_connect is async, and the
@@ -1215,15 +1252,27 @@ static void audio_on_process(void *userdata, struct spa_io_position *position)
         || (cycle_count <  100 && cycle_count %  10 == 0)
         || (cycle_count >= 100 && cycle_count % 100 == 0);
 
-    /* pwasio's pattern (which we mirror): dequeue once per port to
-     * signal consumption (return value discarded), invoke the host
-     * callback, then queue the *tracked* buffer matching current_half.
-     * PipeWire's internal ring rotates the 2 buffers behind the scenes. */
+    /* Dequeue each port's buffer for this cycle, cache it, and derive
+     * c->current_half from whichever slot PipeWire handed us.  This
+     * replaces the prior approach of blindly toggling current_half
+     * each cycle and assuming PipeWire's ring stays in lockstep —
+     * which it doesn't when the graph drops/skips cycles.  All of our
+     * filter's ports share the same dequeue slot per cycle, so we
+     * take the first non-NULL dequeue as authoritative. */
+    int half_from_dequeue = -1;
     for (uint32_t i = 0; i < c->n_ports; i++) {
         audio_port_t *p = c->ports[i];
-        if (p->pw_filter_port)
-            pw_filter_dequeue_buffer(p->pw_filter_port);
+        p->cycle_buffer = NULL;
+        if (!p->pw_filter_port) continue;
+        struct pw_buffer *b = pw_filter_dequeue_buffer(p->pw_filter_port);
+        p->cycle_buffer = b;
+        if (b && half_from_dequeue < 0) {
+            if      (b == p->pw_buffer[0]) half_from_dequeue = 0;
+            else if (b == p->pw_buffer[1]) half_from_dequeue = 1;
+        }
     }
+    if (half_from_dequeue >= 0)
+        c->current_half = (uint32_t)half_from_dequeue;
 
     /* Track SP across cycles. If stack is growing unboundedly, sp goes DOWN. */
     static uintptr_t sp_first;
@@ -1241,13 +1290,16 @@ static void audio_on_process(void *userdata, struct spa_io_position *position)
     if (c->process_cb)
         c->process_cb(c->buffer_size, c->process_cb_arg);
 
-    const uint32_t half = c->current_half;
     const uint32_t bytes_this_cycle =
         (position ? position->clock.duration : c->buffer_size) * sizeof(audio_sample_t);
 
+    /* Queue back the buffer we dequeued above — NOT a guessed
+     * p->pw_buffer[half], since that's how cycles drift out of sync
+     * with PipeWire's ring and we end up writing the wrong memfd
+     * half. */
     for (uint32_t i = 0; i < c->n_ports; i++) {
         audio_port_t     *p = c->ports[i];
-        struct pw_buffer *b = p->pw_buffer[half];
+        struct pw_buffer *b = p->cycle_buffer;
         if (!b || !p->pw_filter_port)
             continue;
         if (p->direction == PW_DIRECTION_OUTPUT) {
@@ -1258,9 +1310,8 @@ static void audio_on_process(void *userdata, struct spa_io_position *position)
             d->chunk->flags  = 0;
         }
         pw_filter_queue_buffer(p->pw_filter_port, b);
+        p->cycle_buffer = NULL;
     }
-
-    c->current_half ^= 1;
 }
 
 /* ----------------------------------------------------------------------
