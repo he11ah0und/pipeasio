@@ -489,7 +489,11 @@ HIDDEN LONG STDMETHODCALLTYPE Init(LPPIPEASIO iface, void *sysRef)
     audio_set_forced_rate(This->audio_client, (audio_nframes_t)This->pipeasio_sample_rate);
 
     This->host_sample_rate = audio_get_sample_rate(This->audio_client);
-    This->host_current_buffersize = audio_get_buffer_size(This->audio_client);
+    /* Seed the reported buffer size from the user's configured preferred size.
+     * PipeWire has no fixed server buffer — the host's chosen size drives the
+     * quantum via CreateBuffers — so the fixed-size path must report the
+     * configured value, not the backend default. */
+    This->host_current_buffersize = This->pipeasio_preferred_buffersize;
 
     /* Allocate IOChannel structures (zeroed — audio_buffer and active
      * must start NULL/false before CreateBuffers wires them up). */
@@ -1533,7 +1537,14 @@ static VOID configure_driver(IPipeASIOImpl *This)
 
     /* Load settings from the flat INI the pipeasio-settings panel writes
      * ($XDG_CONFIG_HOME/pipeasio/config.ini).  A missing file yields defaults. */
-    pipeasio_config_load(&cfg);
+    char cfg_path[1024] = "";
+    pipeasio_config_path(cfg_path, sizeof cfg_path);
+    bool cfg_found = pipeasio_config_load(&cfg);
+    TRACE("config: %s  path=%s  buffer_size=%d inputs=%d outputs=%d fixed=%d "
+          "rate=%d auto=%d out='%s' in='%s'\n",
+          cfg_found ? "loaded" : "MISSING -> defaults", cfg_path,
+          cfg.buffer_size, cfg.inputs, cfg.outputs, cfg.fixed_buffer_size,
+          cfg.sample_rate, cfg.auto_connect, cfg.output_device, cfg.input_device);
     This->pipeasio_number_inputs        = cfg.inputs;
     This->pipeasio_number_outputs       = cfg.outputs;
     This->pipeasio_connect_to_hardware  = cfg.auto_connect ? TRUE : FALSE;
