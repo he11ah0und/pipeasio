@@ -1,11 +1,11 @@
 /*
  * audio.c — native libpipewire-0.3 backend for PipeASIO.
  *
- * Phase 3 milestone M1: the PipeWire context and thread loop are stood
- * up here; spa_thread_utils is overridden so PipeWire's RT thread is
- * allocated via Win32 CreateThread, giving it a proper Wine TEB.
- * No pw_filter is created yet — ports and audio flow land in M2, and
- * registry-driven port discovery / autoconnect land in M3.
+ * Stands up a pw_thread_loop and context, and overrides spa_thread_utils
+ * on the data loop so PipeWire's RT thread is a Win32 CreateThread'd Wine
+ * thread (proper TEB, able to call back into the ASIO host's COM methods).
+ * Creates a duplex pw_filter with MAP_BUFFERS ports and walks the registry
+ * for port discovery and audio_connect.
  *
  * Copyright (C) 2026 PipeASIO contributors
  *
@@ -23,7 +23,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include "windef.h"
 #include "winbase.h"
-#include "winternl.h"
 #include "wine/debug.h"
 
 #include <stdlib.h>   /* getenv for PIPEASIO_DEBUG */
@@ -75,15 +74,15 @@ static inline int pipeasio_log_on(void)
 
 WINE_DEFAULT_DEBUG_CHANNEL(asio);
 
-/* M1 placeholder defaults; M2 reads from registry / PipeWire metadata. */
-#define AUDIO_M1_DEFAULT_SAMPLE_RATE  48000u
-#define AUDIO_M1_DEFAULT_BUFFER_SIZE   1024u
+/* Startup defaults.  The buffer size is overridden by the ASIO host's
+ * negotiated size in CreateBuffers; the sample rate is overridden by
+ * audio_on_io_changed when the graph runs at a different rate. */
+#define AUDIO_DEFAULT_SAMPLE_RATE  48000u
+#define AUDIO_DEFAULT_BUFFER_SIZE   1024u
 
-/* SCHED_FIFO range used in M1.  M3 replaces this with values read from
- * libpipewire-module-rt's "rt.prio" / "rt.time.soft" properties so we
- * honor the user's rlimit_rtprio. */
-#define AUDIO_M1_RT_PRIO_MIN  1
-#define AUDIO_M1_RT_PRIO_MAX 80
+/* SCHED_FIFO range offered to PipeWire's rt handling. */
+#define AUDIO_RT_PRIO_MIN  1
+#define AUDIO_RT_PRIO_MAX 80
 
 /* ----------------------------------------------------------------------
  * Wine RT thread bridge — install custom spa_thread_utils on the data
@@ -107,30 +106,10 @@ static DWORD WINAPI audio_rt_trampoline(LPVOID raw)
 {
     struct audio_rt_state *s = raw;
 
-    /* Print BOTH the Linux pthread view and Wine TEB view of the stack
-     * so we can tell which matches the actual Win32 stack the bridge
-     * code runs on. */
-    NT_TIB *tib = (NT_TIB *)NtCurrentTeb();
-    TRACE("rt_trampoline: ENTRY tid=%lx local=%p teb.base=%p teb.limit=%p "
-          "(size=%zu KB)\n",
-          (unsigned long)GetCurrentThreadId(), (void *)&s,
-          tib->StackBase, tib->StackLimit,
-          (size_t)((char*)tib->StackBase - (char*)tib->StackLimit) / 1024);
-
     s->ptid = pthread_self();
     atomic_store_explicit(&s->ready, true, memory_order_release);
 
-    {
-        pthread_attr_t attr;
-        if (pthread_getattr_np(pthread_self(), &attr) == 0) {
-            void  *sp_base = NULL;
-            size_t sp_size = 0;
-            if (pthread_attr_getstack(&attr, &sp_base, &sp_size) == 0)
-                TRACE("rt_thread: pthread stack base=%p size=%zu (%.2f MB)\n",
-                      sp_base, sp_size, sp_size / (1024.0 * 1024.0));
-            pthread_attr_destroy(&attr);
-        }
-    }
+    TRACE("rt thread entry: tid=%lx\n", (unsigned long)GetCurrentThreadId());
 
     s->user_ret = s->user_entry(s->user_arg);
     return 0;
@@ -148,10 +127,8 @@ audio_rt_create(void *data, const struct spa_dict *props,
     s->user_arg   = arg;
     atomic_store_explicit(&s->ready, false, memory_order_relaxed);
 
-    /* 8MB stack so we can distinguish "1MB default really was too small for
-     * pw_filter → audio_on_process → ASIO host callback chain" (smash goes
-     * away) from "unbounded recursion or buffer overflow" (smash persists,
-     * ASan in Debug build pinpoints it).
+    /* 8MB stack for the pw_filter → audio_on_process → ASIO host callback
+     * chain; the Win32 1MB default is too small.
      *
      * STACK_SIZE_PARAM_IS_A_RESERVATION (0x00010000) — without this flag
      * dwStackSize sets only the *committed* size; the *reserved* size
@@ -193,8 +170,8 @@ static int audio_rt_get_range(void *data, const struct spa_dict *props,
                               int *min, int *max)
 {
     (void)data; (void)props;
-    *min = AUDIO_M1_RT_PRIO_MIN;
-    *max = AUDIO_M1_RT_PRIO_MAX;
+    *min = AUDIO_RT_PRIO_MIN;
+    *max = AUDIO_RT_PRIO_MAX;
     return 0;
 }
 
@@ -272,7 +249,7 @@ struct audio_client {
 
     bool                        active;
 
-    /* --- M2: pw_filter ------------------------------------------------ */
+    /* --- pw_filter ------------------------------------------------ */
 
     struct pw_filter           *filter;
     struct spa_hook             filter_listener;
@@ -287,7 +264,7 @@ struct audio_client {
     uint64_t                    last_clock_nsec;
     uint64_t                    last_clock_position;
 
-    /* --- M3: registry walker ----------------------------------------- */
+    /* --- registry walker ----------------------------------------- */
 
     struct pw_registry         *registry;
     struct spa_hook             registry_listener;
@@ -323,13 +300,13 @@ struct audio_port {
     uint64_t               flags;
     audio_latency_range_t  latency[2];           /* [CAPTURE, PLAYBACK] */
 
-    /* --- M2: PipeWire port handle ------------------------------------- */
+    /* --- PipeWire port handle ------------------------------------- */
 
     enum pw_direction      direction;
     void                  *pw_filter_port;       /* returned by pw_filter_add_port */
     struct pw_buffer      *cycle_buffer;         /* this cycle's dequeued buffer; datas[0].data is the live mmap */
 
-    /* --- M3: PipeWire registry IDs (for audio_connect link-factory) -- */
+    /* --- PipeWire registry IDs (for audio_connect link-factory) -- */
 
     uint32_t               pw_node_id;
     uint32_t               pw_port_id;
@@ -396,8 +373,8 @@ audio_client_t *audio_open(const char *client_name, uint32_t options, uint32_t *
     }
 
     c->name         = strdup(client_name ? client_name : "PipeASIO");
-    c->sample_rate  = AUDIO_M1_DEFAULT_SAMPLE_RATE;
-    c->buffer_size  = AUDIO_M1_DEFAULT_BUFFER_SIZE;
+    c->sample_rate  = AUDIO_DEFAULT_SAMPLE_RATE;
+    c->buffer_size  = AUDIO_DEFAULT_BUFFER_SIZE;
     c->our_node_id  = SPA_ID_INVALID;
     atomic_init(&c->rt.ready, false);
 
@@ -787,16 +764,19 @@ bool audio_set_buffer_size(audio_client_t *c, audio_nframes_t nframes)
     c->buffer_size = nframes;
     if (c->buffer_size_cb)
         c->buffer_size_cb(nframes, c->buffer_size_cb_arg);
-    /* M2 will re-issue PW_KEY_NODE_FORCE_QUANTUM and force a reconnect. */
+    /* Applied on the next audio_activate, which rebuilds the filter with
+     * the new PW_KEY_NODE_FORCE_QUANTUM (host path: DisposeBuffers →
+     * audio_deactivate, then CreateBuffers → audio_set_buffer_size →
+     * audio_activate). */
     return true;
 }
 
 /* ----------------------------------------------------------------------
- * Ports — M1 stubs.  audio_port_register returns a heap-allocated
- * audio_port so the asio.c IOChannel layer has a non-null handle to
- * carry around; audio_port_get_buffer returns NULL, so the process
- * callback (which doesn't fire in M1 — no filter is connected) cannot
- * accidentally write into garbage.
+ * Ports.  audio_port_register allocates an audio_port_t and appends it to
+ * the client's port array; audio_activate turns each into a pw_filter
+ * port.  During a process cycle audio_port_get_buffer returns the live
+ * MAP_BUFFERS mmap (cycle_buffer->buffer->datas[0].data); outside a cycle
+ * it returns NULL.
  * ---------------------------------------------------------------------- */
 
 audio_port_t *audio_port_register(audio_client_t *c,
@@ -1110,18 +1090,11 @@ static void audio_on_io_changed(void *userdata, void *port_data, uint32_t id,
 static void audio_on_process(void *userdata, struct spa_io_position *position)
 {
     audio_client_t *c = userdata;
-    static uint64_t cycle_count;
 
     if (position) {
         c->last_clock_nsec     = position->clock.nsec;
         c->last_clock_position = position->clock.position;
     }
-
-    cycle_count++;
-    bool log_this_cycle =
-        cycle_count <= 8
-        || (cycle_count <  100 && cycle_count %  10 == 0)
-        || (cycle_count >= 100 && cycle_count % 100 == 0);
 
     /* Dequeue this cycle's buffer for every port.  Because the ports use
      * PW_FILTER_PORT_FLAG_MAP_BUFFERS, pw_filter has already mmap'd each
@@ -1136,9 +1109,14 @@ static void audio_on_process(void *userdata, struct spa_io_position *position)
             ? pw_filter_dequeue_buffer(p->pw_filter_port) : NULL;
     }
 
-    if (log_this_cycle)
-        TRACE("process: cycle=%lu tid=%lx\n",
-              (unsigned long)cycle_count, (unsigned long)GetCurrentThreadId());
+    if (pipeasio_log_on()) {
+        static uint64_t cycle_count;
+        if (++cycle_count <= 8
+            || (cycle_count <  100 && cycle_count %  10 == 0)
+            || (cycle_count >= 100 && cycle_count % 100 == 0))
+            TRACE("process: cycle=%lu tid=%lx\n",
+                  (unsigned long)cycle_count, (unsigned long)GetCurrentThreadId());
+    }
 
     /* Run the ASIO host's process callback; audio_port_get_buffer returns
      * each port's dequeued-buffer data pointer. */
