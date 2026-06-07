@@ -74,9 +74,11 @@ clangd; the in-tree `.clang-format` and `.editorconfig` keep diffs clean.
 For user convenience a `pipeasio-register` script is included in this repo, if you are packaging PipeASIO consider installing it as part of PipeASIO.
 
 Additionally a native settings panel (`pipeasio-settings`, C++/Qt6 Widgets) is
-built from this repository's `gui` subdir and installed to `bin`.  PipeASIO
-launches it as the ASIO control panel.  It needs Qt6 Widgets at build time; pass
-`-DBUILD_SETTINGS_PANEL=OFF` to skip it.
+built from this repository's `gui` subdir and installed to `bin`.  Run it from a
+terminal on your Linux host; the in-app ASIO "control panel" button shows a
+message pointing here, because the Qt panel cannot run inside the Wine/Proton
+container the host loads the driver into.  It needs Qt6 Widgets at build time;
+pass `-DBUILD_SETTINGS_PANEL=OFF` to skip it.
 
 ### REGISTERING
 
@@ -197,6 +199,9 @@ program name).  Env: `PIPEASIO_CLIENT_NAME`.
 ### CHANGE LOG
 
 #### Unreleased
+* 07-JUN-2026: Fix slow / pitched-down playback at any buffer size other than the backend default — `CreateBuffers()` now always syncs the negotiated size to the PipeWire quantum
+* 07-JUN-2026: The in-app ASIO "control panel" button now shows a message directing you to run `pipeasio-settings` on the host (the Qt panel can't run inside the Wine/Proton container) instead of silently failing
+* 07-JUN-2026: Monitor tab auto-discovers the driver's PipeWire node (the host names it after its own executable), via a `pipeasio.node` marker
 * 07-JUN-2026: New native C++/Qt6 settings panel (replaces the PyQt GUI), with Settings and live Monitor (PipeWire DSP load / xruns / quantum) tabs
 * 07-JUN-2026: Move configuration from the Windows registry to a flat INI at `$XDG_CONFIG_HOME/pipeasio/config.ini`
 * 07-JUN-2026: Add PipeWire output/input device selection (`output_device` / `input_device`), honored by autoconnect

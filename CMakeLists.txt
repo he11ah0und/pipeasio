@@ -32,7 +32,7 @@ add_wine_dll(
               src/regsvr.c
     INCLUDES  ${CMAKE_SOURCE_DIR}/include
               ${PIPEWIRE_INCLUDE_DIRS}
-    LIBS      odbc32 ole32 uuid winmm pipewire-0.3
+    LIBS      odbc32 ole32 uuid winmm user32 pipewire-0.3
 )
 
 include(GNUInstallDirs)
@@ -40,9 +40,11 @@ include(GNUInstallDirs)
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/pipeasio-register
         DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-# Native Qt6 settings panel (pipeasio-settings), launched by ControlPanel on the
-# user's Linux desktop.  Optional and self-contained: the core Wine driver builds
-# fine without it.  Skips gracefully if no C++ compiler or Qt6 Widgets is present.
+# Native Qt6 settings panel (pipeasio-settings), run from the user's Linux host
+# terminal.  The in-Wine ControlPanel button only shows a message pointing here,
+# since the Qt panel can't run inside the Wine/Proton container.  Optional and
+# self-contained: the core Wine driver builds fine without it.  Skips gracefully
+# if no C++ compiler or Qt6 Widgets is present.
 option(BUILD_SETTINGS_PANEL "Build the Qt6 settings panel" ON)
 if(BUILD_SETTINGS_PANEL)
     include(CheckLanguage)

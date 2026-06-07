@@ -62,6 +62,7 @@ static inline int pipeasio_log_on(void)
 #include <objbase.h>
 #include <mmsystem.h>
 #include <winreg.h>
+#include <winuser.h>   /* MessageBoxA for the ControlPanel info dialog */
 #ifdef WINE_WITH_UNICODE
 #include <wine/unicode.h>
 #endif
@@ -1231,16 +1232,32 @@ HIDDEN LONG STDMETHODCALLTYPE DisposeBuffers(LPPIPEASIO iface)
 DEFINE_THISCALL_WRAPPER(ControlPanel,4)
 HIDDEN LONG STDMETHODCALLTYPE ControlPanel(LPPIPEASIO iface)
 {
-    static char arg0[] = "pipeasio-settings\0";
-    static char *arg_list[] = { arg0, NULL };
+    char cfg_path[1024];
+    char message[1536];
 
     TRACE("iface: %p\n", iface);
 
-    if (vfork() == 0)
-    {
-        execvp (arg0, arg_list);
-        _exit(1);
-    }
+    /* The settings panel (pipeasio-settings) is a native Linux/Qt app and
+     * cannot run inside the Wine/Proton container the host loads us into:
+     * the container has no Qt libraries and no clean route back to the host.
+     * Rather than fork/exec it and silently fail, tell the user to launch it
+     * from a host terminal, and point at the exact INI it edits. */
+    if (!pipeasio_config_path(cfg_path, sizeof cfg_path))
+        lstrcpynA(cfg_path, "$XDG_CONFIG_HOME/pipeasio/config.ini", sizeof cfg_path);
+
+    snprintf(message, sizeof message,
+             "Please launch the PipeASIO settings panel from a terminal on your "
+             "Linux host:\n\n"
+             "    pipeasio-settings\n\n"
+             "It is a native Linux app, so it cannot run inside this Wine/Proton "
+             "container.\n\n"
+             "Settings are saved to:\n    %s\n\n"
+             "Changes take effect the next time the driver loads. Reselect "
+             "PipeASIO, or restart this application.",
+             cfg_path);
+
+    MessageBoxA(NULL, message, "PipeASIO Settings",
+                MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
     return 0;
 }
 
