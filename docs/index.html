@@ -3,11 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>PipeASIO - ASIO driver for Wine, native to PipeWire</title>
 <meta name="description" content="PipeASIO is an ASIO driver for Wine that speaks to PipeWire directly. No libjack, no Wine audio detour. Built so FL Studio and other ASIO hosts run under Proton.">
 <meta property="og:title" content="PipeASIO">
 <meta property="og:description" content="An ASIO driver for Wine that speaks to PipeWire directly. No libjack, no detours.">
 <meta property="og:type" content="website">
+<meta property="og:url" content="https://m0n7y5.github.io/pipeasio/">
+<meta property="og:image" content="https://m0n7y5.github.io/pipeasio/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="PipeASIO">
+<meta name="twitter:description" content="An ASIO driver for Wine that speaks to PipeWire directly. No libjack, no detours.">
+<meta name="twitter:image" content="https://m0n7y5.github.io/pipeasio/og.png">
 <style>
   :root {
     --bg: #19191c;
@@ -52,7 +61,8 @@
     border-bottom: 1px solid var(--border);
   }
   .nav { display: flex; align-items: center; justify-content: space-between; height: 60px; }
-  .brand { font-weight: 800; font-size: 19px; letter-spacing: .2px; }
+  .brand { display: inline-flex; align-items: center; gap: 9px; font-weight: 800; font-size: 19px; letter-spacing: .2px; }
+  .brand-mark { width: 27px; height: 27px; display: block; }
   .brand .dot { color: var(--accent); }
   .nav-links { display: flex; gap: 22px; align-items: center; }
   .nav-links a { color: var(--muted); font-size: 15px; }
@@ -190,7 +200,7 @@
 
 <header>
   <div class="wrap nav">
-    <span class="brand">Pipe<span class="dot">ASIO</span></span>
+    <span class="brand"><svg class="brand-mark" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs><linearGradient id="bw" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#d8470f"/><stop offset=".55" stop-color="#ff6a1f"/><stop offset="1" stop-color="#ff9352"/></linearGradient><linearGradient id="bt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#242428"/><stop offset="1" stop-color="#16161a"/></linearGradient></defs><rect x="1.5" y="1.5" width="61" height="61" rx="15" fill="url(#bt)" stroke="#ff6a1f" stroke-opacity=".28"/><rect x="6.5" y="25" width="12" height="14" rx="4" fill="#6e6e7a"/><rect x="45.5" y="25" width="12" height="14" rx="4" fill="#ff6a1f"/><path d="M18.5 32 C22.5 16 28.5 16 32 32 C35.5 48 41.5 48 45.5 32" fill="none" stroke="url(#bw)" stroke-width="5.5" stroke-linecap="round"/></svg>Pipe<span class="dot">ASIO</span></span>
     <nav class="nav-links">
       <a href="#routing" class="hide-sm">How it works</a>
       <a href="#compare" class="hide-sm">Compare</a>

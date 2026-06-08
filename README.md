@@ -1,4 +1,9 @@
-# PipeASIO
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo.svg">
+    <img alt="PipeASIO" src="docs/logo-light.svg" width="300">
+  </picture>
+</p>
 
 PipeASIO is an ASIO driver for Wine that talks to PipeWire directly — no `libjack.so.0` runtime dependency.
 
