@@ -61,7 +61,6 @@ class SettingsDialog : public QDialog
     LoadHistogram *m_monLoad    = nullptr;
     QLabel        *m_monXruns   = nullptr;
     QLabel        *m_monState   = nullptr;
-    QLabel        *m_monRt      = nullptr;
 
     PipeWireMonitor m_monitor;
 };
