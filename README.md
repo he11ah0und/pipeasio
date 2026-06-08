@@ -9,6 +9,13 @@
   <a href="https://m0n7y5.github.io/pipeasio/"><b>Website &amp; docs</b></a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/M0n7y5/pipeasio/releases"><img alt="Release" src="https://img.shields.io/github/v/release/M0n7y5/pipeasio?include_prereleases&amp;label=release&amp;color=ff6a1f"></a>
+  <img alt="License" src="https://img.shields.io/badge/license-LGPL--2.1%20%2F%20GPL--2.0-blue">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Linux%20x86__64-lightgrey">
+  <img alt="PipeWire" src="https://img.shields.io/badge/PipeWire-1.6%2B-ff6a1f">
+</p>
+
 PipeASIO is an ASIO driver for Wine that talks to PipeWire directly, with no
 `libjack.so.0` runtime dependency.
 
@@ -26,6 +33,24 @@ ASIO is the most common low-latency audio driver on Windows, used by workstation
 such as FL Studio, Ableton Live, and Reaper.
 
 ![PipeASIO settings panel](docs/panel-settings.png)
+
+> [!NOTE]
+> PipeASIO is at **1.0.0-rc1**. It is verified with FL Studio under Proton-CachyOS; other ASIO hosts such as Reaper and Ableton Live should work but are not yet confirmed. x86_64 only, and bug reports are very welcome.
+
+## Quick start
+
+```sh
+# Build
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
+
+# Install (user-local; use --prefix /usr for system-wide)
+cmake --install build --prefix "$HOME/.local"
+
+# Register in the current Wine prefix
+pipeasio-register
+```
+
+Under Proton or Steam, also set `WINEDLLPATH=$HOME/.local/lib/wine` in the launcher and register inside the game's prefix. See the Proton / Steam / Faugus section below.
 
 ## Building
 
@@ -222,6 +247,31 @@ host. The in-app ASIO control-panel button shows a message pointing here, becaus
 the Qt panel cannot run inside the Wine/Proton container the host loads the driver
 into.
 
+## Troubleshooting
+
+**No sound, or the driver does not load under Proton.** Proton's container cannot see `/usr/lib/wine`. Install under `$HOME`, set `WINEDLLPATH=$HOME/.local/lib/wine` in your launcher's per-game environment, then register in that prefix.
+
+**Registering fails with status `c0000135`.** Wine could not find the unified PE name. The install creates `pipeasio.dll` symlinks next to `pipeasio64.dll` for Wine 10+, so re-run `cmake --install` to create them, then register again.
+
+**Bluetooth headphones produce no sound.** Turn on `follow_device_clock` (or set `PIPEASIO_FOLLOW_DEVICE_CLOCK=on`). A Bluetooth sink's clock is the radio link and cannot be slaved to the host, so the driver follows it instead.
+
+**Does it conflict with WineASIO?** No. PipeASIO has its own CLSID and registry identity, so it installs side by side with WineASIO and hosts list them as separate drivers.
+
+**How do I select it in my DAW?** After registering, pick PipeASIO from the host's ASIO device list. In FL Studio that is Options > Audio settings > Device.
+
+## Uninstalling
+
+Unregister from each Wine prefix you registered, then remove the files:
+
+```sh
+# Unregister (set WINEDLLPATH the same way pipeasio-register does)
+env WINEDLLPATH="$HOME/.local/lib/wine" wine regsvr32 /u pipeasio64.dll
+rm -f "$WINEPREFIX/drive_c/windows/system32/pipeasio64.dll"
+
+# Remove the installed files (CMake records them at install time)
+xargs rm -f < build/install_manifest.txt
+```
+
 ## Development
 
 Recommended VS Code extensions are listed in `.vscode/extensions.json`. The build
@@ -230,6 +280,14 @@ emits `build/compile_commands.json` for clangd; the in-tree `.clang-format` and
 
 If you package PipeASIO, consider installing the `pipeasio-register` helper script
 as part of the package.
+
+## Contributing
+
+Issues and pull requests are welcome on [GitHub](https://github.com/M0n7y5/pipeasio). Run `clang-format` (the config is in-tree) before submitting, and keep changes x86_64 and C11.
+
+## Acknowledgements
+
+PipeASIO builds on [WineASIO](https://github.com/wineasio/wineasio) and the work of its authors: Robert Reif, Ralf Beck, Johnny Petrantoni, Stephane Letz, William Steidtmann, Peter L Jones, Torben Hohn, Nedko Arnaudov, Christian Schoenebeck, Joakim Hernberg, and Filipe Coelho.
 
 ## License
 
