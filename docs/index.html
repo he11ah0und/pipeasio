@@ -139,6 +139,18 @@
   .step { color: var(--accent); font-size: 13px; margin: 26px 0 8px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; }
   .step:first-child { margin-top: 0; }
   .note { border: 1px solid var(--border); border-left: 3px solid var(--accent); background: var(--bg-soft); border-radius: 10px; padding: 14px 18px; color: var(--muted); font-size: 15px; }
+  .hero-note { margin: 20px auto 0; max-width: 540px; font-size: 13.5px; color: var(--muted); }
+  .hero-note b { color: var(--accent); font-weight: 600; }
+  /* FAQ */
+  .faq details { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); margin-bottom: 10px; }
+  .faq summary { cursor: pointer; padding: 15px 46px 15px 18px; font-weight: 600; font-size: 15px; list-style: none; position: relative; }
+  .faq summary::-webkit-details-marker { display: none; }
+  .faq summary::after { content: "+"; position: absolute; right: 18px; top: 13px; color: var(--accent); font-size: 21px; transition: transform .2s ease; }
+  .faq details[open] summary::after { transform: rotate(45deg); }
+  .faq summary:hover { color: var(--accent); }
+  .faq .ans { padding: 0 18px 16px; color: var(--muted); font-size: 14.5px; line-height: 1.6; }
+  .faq .ans b, .note b { color: var(--text); }
+  .faq .ans code, .note code { color: var(--accent); background: #141417; padding: 2px 6px; border-radius: 5px; font-size: 13px; }
 
   /* Config table */
   table.cfg { width: 100%; border-collapse: collapse; font-size: 14.5px; }
@@ -204,6 +216,7 @@
         <a class="btn btn-primary" href="#quickstart">Get started</a>
         <a class="btn btn-ghost" href="https://github.com/M0n7y5/pipeasio">View on GitHub</a>
       </div>
+      <p class="hero-note fu d4"><b>Note:</b> install is hands-on for now. A simpler install process and better docs are actively in progress.</p>
     </div>
   </section>
 
@@ -356,6 +369,35 @@ sudo cmake --install build --prefix /usr</pre>
           <tr><td><code>follow_device_clock</code></td><td class="d">off</td><td>Let the target device drive the cycle (needed for Bluetooth).</td></tr>
         </tbody>
       </table>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="wrap reveal">
+      <h2>Questions and troubleshooting</h2>
+      <p class="note" style="margin-bottom: 26px">PipeASIO is at <b>1.0.0-rc1</b>, verified with FL Studio under Proton-CachyOS. Other ASIO hosts (Reaper, Ableton Live) should work but are not yet confirmed. Reports are very welcome.</p>
+      <div class="faq">
+        <details>
+          <summary>No sound, or the driver does not load under Proton?</summary>
+          <div class="ans">Proton's container cannot see <code>/usr/lib/wine</code>. Install under <code>$HOME</code>, set <code>WINEDLLPATH=$HOME/.local/lib/wine</code> in your launcher's per-game environment, then register in that prefix.</div>
+        </details>
+        <details>
+          <summary>Registering fails with status <code>c0000135</code>?</summary>
+          <div class="ans">Wine could not find the unified PE name. The install creates <code>pipeasio.dll</code> symlinks next to <code>pipeasio64.dll</code> for Wine 10+, so re-run <code>cmake --install</code> to create them, then register again.</div>
+        </details>
+        <details>
+          <summary>Bluetooth headphones produce no sound?</summary>
+          <div class="ans">Turn on <b>follow device clock</b> in the panel (or set <code>PIPEASIO_FOLLOW_DEVICE_CLOCK=on</code>). A Bluetooth sink's clock is the radio link and cannot be slaved to the host, so the driver follows it instead.</div>
+        </details>
+        <details>
+          <summary>Does it conflict with WineASIO?</summary>
+          <div class="ans">No. PipeASIO has its own CLSID and registry identity, so it installs side by side with WineASIO and hosts list them as separate drivers.</div>
+        </details>
+        <details>
+          <summary>How do I select it in my DAW?</summary>
+          <div class="ans">After registering, pick <b>PipeASIO</b> from the host's ASIO device list. In FL Studio that is Options &gt; Audio settings &gt; Device.</div>
+        </details>
+      </div>
     </div>
   </section>
 </main>
