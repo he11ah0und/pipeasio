@@ -40,6 +40,11 @@
   h2 + .lead { color: var(--muted); margin: 0 0 30px; max-width: 720px; }
   p { color: #cdcdd3; }
 
+  /* Announcement */
+  .announce { background: linear-gradient(90deg, rgba(255,106,31,.16), rgba(255,106,31,.05)); border-bottom: 1px solid rgba(255,106,31,.28); font-size: 13.5px; }
+  .announce-in { display: flex; align-items: center; justify-content: center; gap: 11px; min-height: 40px; padding: 7px 16px; text-align: center; color: var(--text); }
+  .tag-soon { font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: #fff; background: var(--accent); padding: 3px 9px; border-radius: 999px; animation: soonPulse 2.4s ease-out infinite; }
+  @keyframes soonPulse { 0% { box-shadow: 0 0 0 0 rgba(255,106,31,.5); } 70% { box-shadow: 0 0 0 9px rgba(255,106,31,0); } 100% { box-shadow: 0 0 0 0 rgba(255,106,31,0); } }
   /* Header */
   header {
     position: sticky; top: 0; z-index: 20;
@@ -163,6 +168,13 @@
 <noscript><style>.reveal { opacity: 1 !important; transform: none !important; }</style></noscript>
 </head>
 <body>
+
+<div class="announce">
+  <div class="wrap announce-in">
+    <span class="tag-soon">Soon</span>
+    <span>Packaging in progress: PipeASIO is coming to your distro's package manager. <a href="https://github.com/M0n7y5/pipeasio">Star it on GitHub</a> to follow along.</span>
+  </div>
+</div>
 
 <header>
   <div class="wrap nav">
@@ -322,6 +334,10 @@ sudo cmake --install build --prefix /usr</pre>
       <p>Proton runs Wine in a container that cannot see <code>/usr/lib/wine</code>, so install under <code>$HOME</code> (above) and point Proton's Wine at the ELF half by setting this in your launcher's per-game environment:</p>
 <pre>WINEDLLPATH=/home/&lt;you&gt;/.local/lib/wine</pre>
       <p class="note">Use the absolute path (Faugus does not expand <code>~</code>). Then pick <b>PipeASIO</b> as the ASIO device inside your host. The full config reference and environment overrides live in the <a href="https://github.com/M0n7y5/pipeasio#readme">README</a>.</p>
+
+      <div class="step">5 / Configure with the panel</div>
+      <p>The same install drops a native settings app, <code>pipeasio-settings</code> (built whenever <code>qt6-base-dev</code> is present). Launch it to set channels, buffer size and device routing, and to watch the live Monitor. Saves apply within about a second, with no host restart.</p>
+<pre>pipeasio-settings</pre>
     </div>
   </section>
 
