@@ -20,54 +20,59 @@
 #include <stddef.h>
 
 /* --- File location (relative to $XDG_CONFIG_HOME, else $HOME/.config) ----- */
-#define PIPEASIO_CONFIG_DIR     "pipeasio"
-#define PIPEASIO_CONFIG_FILE    "config.ini"
+#define PIPEASIO_CONFIG_DIR "pipeasio"
+#define PIPEASIO_CONFIG_FILE "config.ini"
 #define PIPEASIO_CONFIG_SECTION "pipeasio"
 
 /* --- INI keys ------------------------------------------------------------- */
-#define PIPEASIO_KEY_INPUTS            "inputs"
-#define PIPEASIO_KEY_OUTPUTS           "outputs"
-#define PIPEASIO_KEY_BUFFER_SIZE       "buffer_size"
+#define PIPEASIO_KEY_INPUTS "inputs"
+#define PIPEASIO_KEY_OUTPUTS "outputs"
+#define PIPEASIO_KEY_BUFFER_SIZE "buffer_size"
 #define PIPEASIO_KEY_FIXED_BUFFER_SIZE "fixed_buffer_size"
-#define PIPEASIO_KEY_SAMPLE_RATE       "sample_rate"
-#define PIPEASIO_KEY_AUTO_CONNECT      "auto_connect"
-#define PIPEASIO_KEY_OUTPUT_DEVICE     "output_device"
-#define PIPEASIO_KEY_INPUT_DEVICE      "input_device"
-#define PIPEASIO_KEY_NODE_NAME         "node_name"
+#define PIPEASIO_KEY_SAMPLE_RATE "sample_rate"
+#define PIPEASIO_KEY_AUTO_CONNECT "auto_connect"
+#define PIPEASIO_KEY_OUTPUT_DEVICE "output_device"
+#define PIPEASIO_KEY_INPUT_DEVICE "input_device"
+#define PIPEASIO_KEY_NODE_NAME "node_name"
+#define PIPEASIO_KEY_FOLLOW_DEVICE_CLOCK "follow_device_clock"
 
 /* --- Defaults ------------------------------------------------------------- */
-#define PIPEASIO_DEFAULT_INPUTS            16
-#define PIPEASIO_DEFAULT_OUTPUTS           16
-#define PIPEASIO_DEFAULT_BUFFER_SIZE       1024
+#define PIPEASIO_DEFAULT_INPUTS 16
+#define PIPEASIO_DEFAULT_OUTPUTS 16
+#define PIPEASIO_DEFAULT_BUFFER_SIZE 1024
 #define PIPEASIO_DEFAULT_FIXED_BUFFER_SIZE true
-#define PIPEASIO_DEFAULT_SAMPLE_RATE       0    /* 0 = follow the PipeWire graph */
-#define PIPEASIO_DEFAULT_AUTO_CONNECT      true
+#define PIPEASIO_DEFAULT_SAMPLE_RATE 0 /* 0 = follow the PipeWire graph */
+#define PIPEASIO_DEFAULT_AUTO_CONNECT true
+#define PIPEASIO_DEFAULT_FOLLOW_DEVICE_CLOCK false
 
 /* --- Bounds (mirror src/asio.c's PIPEASIO_{MINIMUM,MAXIMUM}_BUFFERSIZE) --- */
 #define PIPEASIO_MIN_BUFFER_SIZE 16
 #define PIPEASIO_MAX_BUFFER_SIZE 8192
 
 #define PIPEASIO_DEVICE_NAME_MAX 256
-#define PIPEASIO_NODE_NAME_MAX   256
+#define PIPEASIO_NODE_NAME_MAX 256
 
 /* --- Parsed configuration ------------------------------------------------- */
-struct pipeasio_config {
+struct pipeasio_config
+{
     int  inputs;
     int  outputs;
-    int  buffer_size;                            /* preferred size, power-of-two */
-    bool fixed_buffer_size;                      /* lock the host to buffer_size  */
-    int  sample_rate;                            /* 0 = follow graph, else FORCE_RATE */
-    bool auto_connect;                           /* 0 = manual patching           */
+    int  buffer_size;                             /* preferred size, power-of-two */
+    bool fixed_buffer_size;                       /* lock the host to buffer_size  */
+    int  sample_rate;                             /* 0 = follow graph, else FORCE_RATE */
+    bool auto_connect;                            /* 0 = manual patching           */
+    bool follow_device_clock;                     /* follow target device quantum (BT) */
     char output_device[PIPEASIO_DEVICE_NAME_MAX]; /* node.name; "" = default sink   */
     char input_device[PIPEASIO_DEVICE_NAME_MAX];  /* node.name; "" = default source */
     char node_name[PIPEASIO_NODE_NAME_MAX];       /* "" = derive from app name      */
 };
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-/*
+    /*
  * Populate `out` with defaults, then overlay any values found in the INI at
  * $XDG_CONFIG_HOME/pipeasio/config.ini (fallback $HOME/.config/pipeasio/...).
  * Returns true if a config file was found and parsed, false if none existed
@@ -75,13 +80,13 @@ extern "C" {
  * lines and unknown keys are skipped; out-of-range numeric values fall back to
  * their default.
  */
-bool pipeasio_config_load(struct pipeasio_config *out);
+    bool pipeasio_config_load(struct pipeasio_config *out);
 
-/*
+    /*
  * Resolve the absolute config-file path into `buf` (capacity `n`). Returns
  * false if neither XDG_CONFIG_HOME nor HOME is set. Creates nothing.
  */
-bool pipeasio_config_path(char *buf, size_t n);
+    bool pipeasio_config_path(char *buf, size_t n);
 
 #ifdef __cplusplus
 }

@@ -30,39 +30,50 @@
 #include <limits.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <pthread.h>
+#include <stdatomic.h>
 
-#include <stdlib.h>   /* getenv for PIPEASIO_DEBUG */
+#include <stdlib.h> /* getenv for PIPEASIO_DEBUG */
 
 /* Include wine/debug.h for helpers like debugstr_guid, then override
  * TRACE/WARN/ERR to raw write(STDERR_FILENO,…): bypasses Wine's WINEDEBUG
  * gating and the stdio buffers discarded on abnormal exit.  Verbose TRACE
  * is opt-in via the PIPEASIO_DEBUG env var; WARN/ERR always emit. */
 #include "wine/debug.h"
-#undef  TRACE
-#undef  WARN
-#undef  ERR
-static inline int pipeasio_log_on(void)
+#undef TRACE
+#undef WARN
+#undef ERR
+static inline int
+pipeasio_log_on(void)
 {
     static int on = -1;
-    if (on < 0) on = getenv("PIPEASIO_DEBUG") ? 1 : 0;
+    if (on < 0)
+        on = getenv("PIPEASIO_DEBUG") ? 1 : 0;
     return on;
 }
-#define PIPEASIO_LOG(pfx, fmt, ...) do {                                       \
-    char _buf[1024];                                                           \
-    int  _n = snprintf(_buf, sizeof _buf, pfx fmt, ##__VA_ARGS__);             \
-    if (_n > 0)                                                                \
-        (void)write(STDERR_FILENO, _buf,                                       \
-                    (size_t)_n < sizeof _buf ? (size_t)_n : sizeof _buf - 1);  \
-} while (0)
-#define TRACE(fmt, ...) do { if (pipeasio_log_on()) PIPEASIO_LOG("[pipeasio] ", fmt, ##__VA_ARGS__); } while (0)
-#define WARN(fmt, ...)  PIPEASIO_LOG("[pipeasio] WARN: ", fmt, ##__VA_ARGS__)
-#define ERR(fmt, ...)   PIPEASIO_LOG("[pipeasio] ERR: ",  fmt, ##__VA_ARGS__)
+#define PIPEASIO_LOG(pfx, fmt, ...)                                                                \
+    do                                                                                             \
+    {                                                                                              \
+        char _buf[1024];                                                                           \
+        int  _n = snprintf(_buf, sizeof _buf, pfx fmt, ##__VA_ARGS__);                             \
+        if (_n > 0)                                                                                \
+            (void)write(STDERR_FILENO, _buf,                                                       \
+                        (size_t)_n < sizeof _buf ? (size_t)_n : sizeof _buf - 1);                  \
+    } while (0)
+#define TRACE(fmt, ...)                                                                            \
+    do                                                                                             \
+    {                                                                                              \
+        if (pipeasio_log_on())                                                                     \
+            PIPEASIO_LOG("[pipeasio] ", fmt, ##__VA_ARGS__);                                       \
+    } while (0)
+#define WARN(fmt, ...) PIPEASIO_LOG("[pipeasio] WARN: ", fmt, ##__VA_ARGS__)
+#define ERR(fmt, ...) PIPEASIO_LOG("[pipeasio] ERR: ", fmt, ##__VA_ARGS__)
 
 #include <objbase.h>
 #include <mmsystem.h>
 #include <winreg.h>
-#include <winuser.h>   /* MessageBoxA for the ControlPanel info dialog */
+#include <winuser.h> /* MessageBoxA for the ControlPanel info dialog */
 #ifdef WINE_WITH_UNICODE
 #include <wine/unicode.h>
 #endif
@@ -75,11 +86,11 @@ static inline int pipeasio_log_on(void)
 WINE_DEFAULT_DEBUG_CHANNEL(asio);
 #endif
 
-#define MAX_ENVIRONMENT_SIZE            64
-#define PIPEASIO_MAX_NAME_LENGTH        32
-#define PIPEASIO_MINIMUM_BUFFERSIZE     16
-#define PIPEASIO_MAXIMUM_BUFFERSIZE     8192
-#define PIPEASIO_PREFERRED_BUFFERSIZE   1024
+#define MAX_ENVIRONMENT_SIZE 64
+#define PIPEASIO_MAX_NAME_LENGTH 32
+#define PIPEASIO_MINIMUM_BUFFERSIZE 16
+#define PIPEASIO_MAXIMUM_BUFFERSIZE 8192
+#define PIPEASIO_PREFERRED_BUFFERSIZE 1024
 
 /* ASIO drivers (breaking the COM specification) use the Microsoft variety of
  * thiscall calling convention which gcc is unable to produce.  These macros
@@ -88,35 +99,37 @@ WINE_DEFAULT_DEBUG_CHANNEL(asio);
  */
 
 /* From config.h */
-#define __ASM_DEFINE_FUNC(name,suffix,code) asm(".text\n\t.align 4\n\t.globl " #name suffix "\n\t.type " #name suffix ",@function\n" #name suffix ":\n\t.cfi_startproc\n\t" code "\n\t.cfi_endproc\n\t.previous");
-#define __ASM_GLOBAL_FUNC(name,code) __ASM_DEFINE_FUNC(name,"",code)
+#define __ASM_DEFINE_FUNC(name, suffix, code)                                                      \
+    asm(".text\n\t.align 4\n\t.globl " #name suffix "\n\t.type " #name suffix                      \
+        ",@function\n" #name suffix ":\n\t.cfi_startproc\n\t" code                                 \
+        "\n\t.cfi_endproc\n\t.previous");
+#define __ASM_GLOBAL_FUNC(name, code) __ASM_DEFINE_FUNC(name, "", code)
 #define __ASM_NAME(name) name
 #define __ASM_STDCALL(args) ""
 
 /* From wine source */
-#ifdef __i386__  /* thiscall functions are i386-specific */
+#ifdef __i386__ /* thiscall functions are i386-specific */
 
-#define THISCALL(func) __thiscall_ ## func
+#define THISCALL(func) __thiscall_##func
 #define THISCALL_NAME(func) __ASM_NAME("__thiscall_" #func)
 #define __thiscall __stdcall
-#define DEFINE_THISCALL_WRAPPER(func,args) \
-    extern void THISCALL(func)(void); \
-    __ASM_GLOBAL_FUNC(__thiscall_ ## func, \
-                      "popl %eax\n\t" \
-                      "pushl %ecx\n\t" \
-                      "pushl %eax\n\t" \
-                      "jmp " __ASM_NAME(#func) __ASM_STDCALL(args) )
+#define DEFINE_THISCALL_WRAPPER(func, args)                                                        \
+    extern void THISCALL(func)(void);                                                              \
+    __ASM_GLOBAL_FUNC(__thiscall_##func, "popl %eax\n\t"                                           \
+                                         "pushl %ecx\n\t"                                          \
+                                         "pushl %eax\n\t"                                          \
+                                         "jmp " __ASM_NAME(#func) __ASM_STDCALL(args))
 #else /* __i386__ */
 
 #define THISCALL(func) func
 #define THISCALL_NAME(func) __ASM_NAME(#func)
 #define __thiscall __stdcall
-#define DEFINE_THISCALL_WRAPPER(func,args) /* nothing */
+#define DEFINE_THISCALL_WRAPPER(func, args) /* nothing */
 
 #endif /* __i386__ */
 
 /* Hide ELF symbols for the COM members - No need to to export them */
-#define HIDDEN __attribute__ ((visibility("hidden")))
+#define HIDDEN __attribute__((visibility("hidden")))
 
 #ifdef _WIN64
 #define PIPEASIO_CALLBACK CALLBACK
@@ -124,15 +137,16 @@ WINE_DEFAULT_DEBUG_CHANNEL(asio);
 #define PIPEASIO_CALLBACK
 #endif
 
-typedef struct w_int64_t {
+typedef struct w_int64_t
+{
     ULONG hi;
     ULONG lo;
 } w_int64_t;
 
 typedef struct BufferInformation
 {
-    LONG isInputType;
-    LONG channelNumber;
+    LONG  isInputType;
+    LONG  channelNumber;
     void *audioBufferStart;
     void *audioBufferEnd;
 } BufferInformation;
@@ -154,10 +168,10 @@ typedef struct TimeInformation
 
 typedef struct Callbacks
 {
-    void (PIPEASIO_CALLBACK *swapBuffers) (LONG, LONG);
-    void (PIPEASIO_CALLBACK *sampleRateChanged) (double);
-    LONG (PIPEASIO_CALLBACK *sendNotification) (LONG, LONG, void*, double*);
-    void* (PIPEASIO_CALLBACK *swapBuffersWithTimeInfo) (TimeInformation*, LONG, LONG);
+    void(PIPEASIO_CALLBACK *swapBuffers)(LONG, LONG);
+    void(PIPEASIO_CALLBACK *sampleRateChanged)(double);
+    LONG(PIPEASIO_CALLBACK *sendNotification)(LONG, LONG, void *, double *);
+    void *(PIPEASIO_CALLBACK *swapBuffersWithTimeInfo)(TimeInformation *, LONG, LONG);
 } Callbacks;
 
 /*****************************************************************************
@@ -165,32 +179,34 @@ typedef struct Callbacks
  */
 
 #define INTERFACE IPipeASIO
-DECLARE_INTERFACE_(IPipeASIO,IUnknown)
+DECLARE_INTERFACE_(IPipeASIO, IUnknown)
 {
-    STDMETHOD_(HRESULT, QueryInterface)         (THIS_ IID riid, void** ppvObject) PURE;
-    STDMETHOD_(ULONG, AddRef)                   (THIS) PURE;
-    STDMETHOD_(ULONG, Release)                  (THIS) PURE;
-    STDMETHOD_(LONG, Init)                      (THIS_ void *sysRef) PURE;
-    STDMETHOD_(void, GetDriverName)             (THIS_ char *name) PURE;
-    STDMETHOD_(LONG, GetDriverVersion)          (THIS) PURE;
-    STDMETHOD_(void, GetErrorMessage)           (THIS_ char *string) PURE;
-    STDMETHOD_(LONG, Start)                     (THIS) PURE;
-    STDMETHOD_(LONG, Stop)                      (THIS) PURE;
-    STDMETHOD_(LONG, GetChannels)               (THIS_ LONG *numInputChannels, LONG *numOutputChannels) PURE;
-    STDMETHOD_(LONG, GetLatencies)              (THIS_ LONG *inputLatency, LONG *outputLatency) PURE;
-    STDMETHOD_(LONG, GetBufferSize)             (THIS_ LONG *minSize, LONG *maxSize, LONG *preferredSize, LONG *granularity) PURE;
-    STDMETHOD_(LONG, CanSampleRate)             (THIS_ double sampleRate) PURE;
-    STDMETHOD_(LONG, GetSampleRate)             (THIS_ double *sampleRate) PURE;
-    STDMETHOD_(LONG, SetSampleRate)             (THIS_ double sampleRate) PURE;
-    STDMETHOD_(LONG, GetClockSources)           (THIS_ void *clocks, LONG *numSources) PURE;
-    STDMETHOD_(LONG, SetClockSource)            (THIS_ LONG index) PURE;
-    STDMETHOD_(LONG, GetSamplePosition)         (THIS_ w_int64_t *sPos, w_int64_t *tStamp) PURE;
-    STDMETHOD_(LONG, GetChannelInfo)            (THIS_ void *info) PURE;
-    STDMETHOD_(LONG, CreateBuffers)             (THIS_ BufferInformation *bufferInfo, LONG numChannels, LONG bufferSize, Callbacks *callbacks) PURE;
-    STDMETHOD_(LONG, DisposeBuffers)            (THIS) PURE;
-    STDMETHOD_(LONG, ControlPanel)              (THIS) PURE;
-    STDMETHOD_(LONG, Future)                    (THIS_ LONG selector,void *opt) PURE;
-    STDMETHOD_(LONG, OutputReady)               (THIS) PURE;
+    STDMETHOD_(HRESULT, QueryInterface)(THIS_ IID riid, void **ppvObject) PURE;
+    STDMETHOD_(ULONG, AddRef)(THIS) PURE;
+    STDMETHOD_(ULONG, Release)(THIS) PURE;
+    STDMETHOD_(LONG, Init)(THIS_ void *sysRef) PURE;
+    STDMETHOD_(void, GetDriverName)(THIS_ char *name) PURE;
+    STDMETHOD_(LONG, GetDriverVersion)(THIS) PURE;
+    STDMETHOD_(void, GetErrorMessage)(THIS_ char *string) PURE;
+    STDMETHOD_(LONG, Start)(THIS) PURE;
+    STDMETHOD_(LONG, Stop)(THIS) PURE;
+    STDMETHOD_(LONG, GetChannels)(THIS_ LONG * numInputChannels, LONG * numOutputChannels) PURE;
+    STDMETHOD_(LONG, GetLatencies)(THIS_ LONG * inputLatency, LONG * outputLatency) PURE;
+    STDMETHOD_(LONG, GetBufferSize)(THIS_ LONG * minSize, LONG * maxSize, LONG * preferredSize,
+                                    LONG * granularity) PURE;
+    STDMETHOD_(LONG, CanSampleRate)(THIS_ double sampleRate) PURE;
+    STDMETHOD_(LONG, GetSampleRate)(THIS_ double *sampleRate) PURE;
+    STDMETHOD_(LONG, SetSampleRate)(THIS_ double sampleRate) PURE;
+    STDMETHOD_(LONG, GetClockSources)(THIS_ void *clocks, LONG *numSources) PURE;
+    STDMETHOD_(LONG, SetClockSource)(THIS_ LONG index) PURE;
+    STDMETHOD_(LONG, GetSamplePosition)(THIS_ w_int64_t * sPos, w_int64_t * tStamp) PURE;
+    STDMETHOD_(LONG, GetChannelInfo)(THIS_ void *info) PURE;
+    STDMETHOD_(LONG, CreateBuffers)(THIS_ BufferInformation * bufferInfo, LONG numChannels,
+                                    LONG bufferSize, Callbacks * callbacks) PURE;
+    STDMETHOD_(LONG, DisposeBuffers)(THIS) PURE;
+    STDMETHOD_(LONG, ControlPanel)(THIS) PURE;
+    STDMETHOD_(LONG, Future)(THIS_ LONG selector, void *opt) PURE;
+    STDMETHOD_(LONG, OutputReady)(THIS) PURE;
 };
 #undef INTERFACE
 
@@ -199,60 +215,70 @@ typedef struct IPipeASIO *LPPIPEASIO;
 typedef struct IOChannel
 {
     audio_sample_t *audio_buffer;
-    char                        port_name[PIPEASIO_MAX_NAME_LENGTH];
-    audio_port_t                 *port;
-    bool                        active;
+    char            port_name[PIPEASIO_MAX_NAME_LENGTH];
+    audio_port_t   *port;
+    bool            active;
 } IOChannel;
 
 typedef struct IPipeASIOImpl
 {
     /* COM stuff */
-    const IPipeASIOVtbl         *lpVtbl;
-    LONG                        ref;
+    const IPipeASIOVtbl *lpVtbl;
+    LONG                 ref;
 
     /* The app's main window handle on windows, 0 on OS/X */
-    HWND                        sys_ref;
+    HWND sys_ref;
 
     /* Host stuff */
-    LONG                        host_active_inputs;
-    LONG                        host_active_outputs;
-    BOOL                        host_buffer_index;
-    Callbacks                  *host_callbacks;
-    BOOL                        host_can_time_code;
-    LONG                        host_current_buffersize;
-    INT                         host_driver_state;
-    w_int64_t                   host_num_samples;
-    double                      host_sample_rate;
-    TimeInformation             host_time;
-    BOOL                        host_time_info_mode;
-    w_int64_t                   host_time_stamp;
-    LONG                        host_version;
+    LONG       host_active_inputs;
+    LONG       host_active_outputs;
+    BOOL       host_buffer_index;
+    Callbacks *host_callbacks;
+    /* Live-config watcher: polls config.ini, asks the host to reset on change */
+    HANDLE          config_watch_thread;
+    HANDLE          config_watch_stop;
+    BOOL            host_can_time_code;
+    LONG            host_current_buffersize;
+    INT             host_driver_state;
+    w_int64_t       host_num_samples;
+    double          host_sample_rate;
+    TimeInformation host_time;
+    BOOL            host_time_info_mode;
+    w_int64_t       host_time_stamp;
+    LONG            host_version;
 
     /* PipeASIO configuration options */
-    int                         pipeasio_number_inputs;
-    int                         pipeasio_number_outputs;
-    BOOL                        pipeasio_connect_to_hardware;
-    BOOL                        pipeasio_fixed_buffersize;
-    LONG                        pipeasio_preferred_buffersize;
-    int                         pipeasio_sample_rate;          /* 0 = follow graph */
-    char                        pipeasio_output_device[PIPEASIO_DEVICE_NAME_MAX];
-    char                        pipeasio_input_device[PIPEASIO_DEVICE_NAME_MAX];
+    int  pipeasio_number_inputs;
+    int  pipeasio_number_outputs;
+    BOOL pipeasio_connect_to_hardware;
+    BOOL pipeasio_fixed_buffersize;
+    BOOL pipeasio_follow_device_clock;
+    LONG pipeasio_preferred_buffersize;
+    int  pipeasio_sample_rate; /* 0 = follow graph */
+    char pipeasio_output_device[PIPEASIO_DEVICE_NAME_MAX];
+    char pipeasio_input_device[PIPEASIO_DEVICE_NAME_MAX];
 
     /* PipeWire client + discovered device ports */
-    audio_client_t               *audio_client;
-    char                        client_name[PIPEASIO_MAX_NAME_LENGTH];
-    int                         num_phys_input_ports;
-    int                         num_phys_output_ports;
-    const char                  **phys_input_ports;
-    const char                  **phys_output_ports;
+    audio_client_t *audio_client;
+    char            client_name[PIPEASIO_MAX_NAME_LENGTH];
+    int             num_phys_input_ports;
+    int             num_phys_output_ports;
+    const char    **phys_input_ports;
+    const char    **phys_output_ports;
 
     /* host process-callback buffers */
     audio_sample_t *callback_audio_buffer;
-    IOChannel                   *input_channel;
-    IOChannel                   *output_channel;
+    IOChannel      *input_channel;
+    IOChannel      *output_channel;
 } IPipeASIOImpl;
 
-enum { Loaded, Initialized, Prepared, Running };
+enum
+{
+    Loaded,
+    Initialized,
+    Prepared,
+    Running
+};
 
 /****************************************************************************
  *  Interface Methods
@@ -262,30 +288,36 @@ enum { Loaded, Initialized, Prepared, Running };
  *  as seen from the PipeASIO source
  */
 
-HIDDEN HRESULT STDMETHODCALLTYPE      QueryInterface(LPPIPEASIO iface, REFIID riid, void **ppvObject);
-HIDDEN ULONG   STDMETHODCALLTYPE      AddRef(LPPIPEASIO iface);
-HIDDEN ULONG   STDMETHODCALLTYPE      Release(LPPIPEASIO iface);
-HIDDEN LONG    STDMETHODCALLTYPE      Init(LPPIPEASIO iface, void *sysRef);
-HIDDEN void    STDMETHODCALLTYPE      GetDriverName(LPPIPEASIO iface, char *name);
-HIDDEN LONG    STDMETHODCALLTYPE      GetDriverVersion(LPPIPEASIO iface);
-HIDDEN void    STDMETHODCALLTYPE      GetErrorMessage(LPPIPEASIO iface, char *string);
-HIDDEN LONG    STDMETHODCALLTYPE      Start(LPPIPEASIO iface);
-HIDDEN LONG    STDMETHODCALLTYPE      Stop(LPPIPEASIO iface);
-HIDDEN LONG    STDMETHODCALLTYPE      GetChannels (LPPIPEASIO iface, LONG *numInputChannels, LONG *numOutputChannels);
-HIDDEN LONG    STDMETHODCALLTYPE      GetLatencies(LPPIPEASIO iface, LONG *inputLatency, LONG *outputLatency);
-HIDDEN LONG    STDMETHODCALLTYPE      GetBufferSize(LPPIPEASIO iface, LONG *minSize, LONG *maxSize, LONG *preferredSize, LONG *granularity);
-HIDDEN LONG    STDMETHODCALLTYPE      CanSampleRate(LPPIPEASIO iface, double sampleRate);
-HIDDEN LONG    STDMETHODCALLTYPE      GetSampleRate(LPPIPEASIO iface, double *sampleRate);
-HIDDEN LONG    STDMETHODCALLTYPE      SetSampleRate(LPPIPEASIO iface, double sampleRate);
-HIDDEN LONG    STDMETHODCALLTYPE      GetClockSources(LPPIPEASIO iface, void *clocks, LONG *numSources);
-HIDDEN LONG    STDMETHODCALLTYPE      SetClockSource(LPPIPEASIO iface, LONG index);
-HIDDEN LONG    STDMETHODCALLTYPE      GetSamplePosition(LPPIPEASIO iface, w_int64_t *sPos, w_int64_t *tStamp);
-HIDDEN LONG    STDMETHODCALLTYPE      GetChannelInfo(LPPIPEASIO iface, void *info);
-HIDDEN LONG    STDMETHODCALLTYPE      CreateBuffers(LPPIPEASIO iface, BufferInformation *bufferInfo, LONG numChannels, LONG bufferSize, Callbacks *callbacks);
-HIDDEN LONG    STDMETHODCALLTYPE      DisposeBuffers(LPPIPEASIO iface);
-HIDDEN LONG    STDMETHODCALLTYPE      ControlPanel(LPPIPEASIO iface);
-HIDDEN LONG    STDMETHODCALLTYPE      Future(LPPIPEASIO iface, LONG selector, void *opt);
-HIDDEN LONG    STDMETHODCALLTYPE      OutputReady(LPPIPEASIO iface);
+HIDDEN HRESULT STDMETHODCALLTYPE QueryInterface(LPPIPEASIO iface, REFIID riid, void **ppvObject);
+HIDDEN ULONG STDMETHODCALLTYPE   AddRef(LPPIPEASIO iface);
+HIDDEN ULONG STDMETHODCALLTYPE   Release(LPPIPEASIO iface);
+HIDDEN LONG STDMETHODCALLTYPE    Init(LPPIPEASIO iface, void *sysRef);
+HIDDEN void STDMETHODCALLTYPE    GetDriverName(LPPIPEASIO iface, char *name);
+HIDDEN LONG STDMETHODCALLTYPE    GetDriverVersion(LPPIPEASIO iface);
+HIDDEN void STDMETHODCALLTYPE    GetErrorMessage(LPPIPEASIO iface, char *string);
+HIDDEN LONG STDMETHODCALLTYPE    Start(LPPIPEASIO iface);
+HIDDEN LONG STDMETHODCALLTYPE    Stop(LPPIPEASIO iface);
+HIDDEN LONG STDMETHODCALLTYPE    GetChannels(LPPIPEASIO iface, LONG *numInputChannels,
+                                             LONG *numOutputChannels);
+HIDDEN LONG STDMETHODCALLTYPE    GetLatencies(LPPIPEASIO iface, LONG *inputLatency,
+                                              LONG *outputLatency);
+HIDDEN LONG STDMETHODCALLTYPE    GetBufferSize(LPPIPEASIO iface, LONG *minSize, LONG *maxSize,
+                                               LONG *preferredSize, LONG *granularity);
+HIDDEN LONG STDMETHODCALLTYPE    CanSampleRate(LPPIPEASIO iface, double sampleRate);
+HIDDEN LONG STDMETHODCALLTYPE    GetSampleRate(LPPIPEASIO iface, double *sampleRate);
+HIDDEN LONG STDMETHODCALLTYPE    SetSampleRate(LPPIPEASIO iface, double sampleRate);
+HIDDEN LONG STDMETHODCALLTYPE    GetClockSources(LPPIPEASIO iface, void *clocks, LONG *numSources);
+HIDDEN LONG STDMETHODCALLTYPE    SetClockSource(LPPIPEASIO iface, LONG index);
+HIDDEN LONG STDMETHODCALLTYPE    GetSamplePosition(LPPIPEASIO iface, w_int64_t *sPos,
+                                                   w_int64_t *tStamp);
+HIDDEN LONG STDMETHODCALLTYPE    GetChannelInfo(LPPIPEASIO iface, void *info);
+HIDDEN LONG STDMETHODCALLTYPE    CreateBuffers(LPPIPEASIO iface, BufferInformation *bufferInfo,
+                                               LONG numChannels, LONG bufferSize,
+                                               Callbacks *callbacks);
+HIDDEN LONG STDMETHODCALLTYPE    DisposeBuffers(LPPIPEASIO iface);
+HIDDEN LONG STDMETHODCALLTYPE    ControlPanel(LPPIPEASIO iface);
+HIDDEN LONG STDMETHODCALLTYPE    Future(LPPIPEASIO iface, LONG selector, void *opt);
+HIDDEN LONG STDMETHODCALLTYPE    OutputReady(LPPIPEASIO iface);
 
 /*
  * thiscall wrappers for the vtbl (as seen from app side 32bit)
@@ -317,59 +349,56 @@ HIDDEN void __thiscall_OutputReady(void);
  *  ASIO process callbacks
  */
 
-static inline int  buffer_size_callback (audio_nframes_t nframes, void *arg);
+static inline int  buffer_size_callback(audio_nframes_t nframes, void *arg);
 static inline void latency_callback(audio_latency_mode_t mode, void *arg);
-static inline int  process_callback (audio_nframes_t nframes, void *arg);
-static inline int  sample_rate_callback (audio_nframes_t nframes, void *arg);
+static inline int  process_callback(audio_nframes_t nframes, void *arg);
+static inline int  sample_rate_callback(audio_nframes_t nframes, void *arg);
 
 /*
  *  Support functions
  */
 
-HRESULT WINAPI  PipeASIOCreateInstance(REFIID riid, LPVOID *ppobj);
-static  VOID    configure_driver(IPipeASIOImpl *This);
+HRESULT WINAPI PipeASIOCreateInstance(REFIID riid, LPVOID *ppobj);
+static VOID    configure_driver(IPipeASIOImpl *This);
 
 /* {2d3ca9e2-1193-4c5d-b5fd-38798f3dc074} */
-static GUID const CLSID_PipeASIO = {
-0x2d3ca9e2, 0x1193, 0x4c5d, { 0xb5, 0xfd, 0x38, 0x79, 0x8f, 0x3d, 0xc0, 0x74 } };
+static GUID const CLSID_PipeASIO
+        = { 0x2d3ca9e2, 0x1193, 0x4c5d, { 0xb5, 0xfd, 0x38, 0x79, 0x8f, 0x3d, 0xc0, 0x74 } };
 
-static const IPipeASIOVtbl PipeASIO_Vtbl =
-{
-    (void *) QueryInterface,
-    (void *) AddRef,
-    (void *) Release,
+static const IPipeASIOVtbl PipeASIO_Vtbl = { (void *)QueryInterface,
+                                             (void *)AddRef,
+                                             (void *)Release,
 
-    (void *) THISCALL(Init),
-    (void *) THISCALL(GetDriverName),
-    (void *) THISCALL(GetDriverVersion),
-    (void *) THISCALL(GetErrorMessage),
-    (void *) THISCALL(Start),
-    (void *) THISCALL(Stop),
-    (void *) THISCALL(GetChannels),
-    (void *) THISCALL(GetLatencies),
-    (void *) THISCALL(GetBufferSize),
-    (void *) THISCALL(CanSampleRate),
-    (void *) THISCALL(GetSampleRate),
-    (void *) THISCALL(SetSampleRate),
-    (void *) THISCALL(GetClockSources),
-    (void *) THISCALL(SetClockSource),
-    (void *) THISCALL(GetSamplePosition),
-    (void *) THISCALL(GetChannelInfo),
-    (void *) THISCALL(CreateBuffers),
-    (void *) THISCALL(DisposeBuffers),
-    (void *) THISCALL(ControlPanel),
-    (void *) THISCALL(Future),
-    (void *) THISCALL(OutputReady)
-};
+                                             (void *)THISCALL(Init),
+                                             (void *)THISCALL(GetDriverName),
+                                             (void *)THISCALL(GetDriverVersion),
+                                             (void *)THISCALL(GetErrorMessage),
+                                             (void *)THISCALL(Start),
+                                             (void *)THISCALL(Stop),
+                                             (void *)THISCALL(GetChannels),
+                                             (void *)THISCALL(GetLatencies),
+                                             (void *)THISCALL(GetBufferSize),
+                                             (void *)THISCALL(CanSampleRate),
+                                             (void *)THISCALL(GetSampleRate),
+                                             (void *)THISCALL(SetSampleRate),
+                                             (void *)THISCALL(GetClockSources),
+                                             (void *)THISCALL(SetClockSource),
+                                             (void *)THISCALL(GetSamplePosition),
+                                             (void *)THISCALL(GetChannelInfo),
+                                             (void *)THISCALL(CreateBuffers),
+                                             (void *)THISCALL(DisposeBuffers),
+                                             (void *)THISCALL(ControlPanel),
+                                             (void *)THISCALL(Future),
+                                             (void *)THISCALL(OutputReady) };
 
 /*****************************************************************************
  * Interface method definitions
  */
 
-
-HIDDEN HRESULT STDMETHODCALLTYPE QueryInterface(LPPIPEASIO iface, REFIID riid, void **ppvObject)
+HIDDEN HRESULT STDMETHODCALLTYPE
+QueryInterface(LPPIPEASIO iface, REFIID riid, void **ppvObject)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl *)iface;
+    IPipeASIOImpl *This = (IPipeASIOImpl *)iface;
 
     TRACE("iface: %p, riid: %s, ppvObject: %p)\n", iface, wine_dbgstr_guid(riid), ppvObject);
 
@@ -392,13 +421,141 @@ HIDDEN HRESULT STDMETHODCALLTYPE QueryInterface(LPPIPEASIO iface, REFIID riid, v
  * Returns:  Ref count
  */
 
-HIDDEN ULONG STDMETHODCALLTYPE AddRef(LPPIPEASIO iface)
+HIDDEN ULONG STDMETHODCALLTYPE
+AddRef(LPPIPEASIO iface)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl *)iface;
-    ULONG           ref = InterlockedIncrement(&(This->ref));
+    IPipeASIOImpl *This = (IPipeASIOImpl *)iface;
+    ULONG          ref  = InterlockedIncrement(&(This->ref));
 
     TRACE("iface: %p, ref count is %u\n", iface, (unsigned)ref);
     return ref;
+}
+
+/* Process-durable hint for follow-device mode: the last device-dictated quantum
+ * the watcher observed.  Init seeds host_current_buffersize from it so the
+ * buffer-size negotiation converges to the device quantum in one settle cycle
+ * instead of re-guessing (and resetting) forever across host re-inits.  One
+ * ASIO driver instance per host process, so a single global suffices. */
+static _Atomic LONG g_follower_quantum;
+
+/*
+ * Live settings-reload watcher.
+ *
+ * The driver reads config.ini once, in configure_driver() at Init.  To make the
+ * Qt settings panel's edits apply to an already-running driver, this background
+ * thread polls the INI once a second; when the file changes on disk it asks the
+ * host to reset (the same kAsioResetRequest path buffer_size_callback uses), so
+ * the host tears down and re-Inits, re-reading the INI.
+ *
+ * It is created with CreateThread (not pthread) so it owns a Wine TEB before it
+ * calls into host code via sendNotification — the same requirement that forces
+ * audio.c's RT thread through CreateThread.  Its lifetime is bracketed by
+ * CreateBuffers (start) and DisposeBuffers (stop+join, before host_callbacks is
+ * cleared), so the host_callbacks dereference can never use-after-free.
+ */
+static DWORD WINAPI
+config_watch_proc(LPVOID arg)
+{
+    IPipeASIOImpl *This = (IPipeASIOImpl *)arg;
+    char           path[1024];
+    struct stat    st;
+    time_t         last_sec           = 0;
+    long           last_nsec          = 0;
+    off_t          last_size          = 0;
+    ino_t          last_ino           = 0;
+    LONG           last_reset_quantum = 0;
+
+    if (!pipeasio_config_path(path, sizeof path))
+    {
+        WARN("config watcher: cannot resolve config path, live reload disabled\n");
+        return 0;
+    }
+    TRACE("config watcher: watching %s\n", path);
+
+    if (stat(path, &st) == 0)
+    {
+        last_sec  = st.st_mtim.tv_sec;
+        last_nsec = st.st_mtim.tv_nsec;
+        last_size = st.st_size;
+        last_ino  = st.st_ino;
+    }
+
+    for (;;)
+    {
+        DWORD waited = WaitForSingleObject(This->config_watch_stop, 1000);
+        if (waited == WAIT_OBJECT_0 || waited == WAIT_FAILED)
+            break;
+
+        bool reset = false;
+
+        /* config.ini edited in the panel */
+        if (stat(path, &st) == 0
+            && (st.st_mtim.tv_sec != last_sec || st.st_mtim.tv_nsec != last_nsec
+                || st.st_size != last_size || st.st_ino != last_ino))
+        {
+            last_sec  = st.st_mtim.tv_sec;
+            last_nsec = st.st_mtim.tv_nsec;
+            last_size = st.st_size;
+            last_ino  = st.st_ino;
+            TRACE("config watcher: %s changed\n", path);
+            reset = true;
+        }
+
+        /* PipeWire default device switched while we are following it */
+        if (This->host_driver_state == Running
+            && (!This->pipeasio_output_device[0] || !This->pipeasio_input_device[0])
+            && audio_default_changed(This->audio_client))
+        {
+            TRACE("config watcher: default device changed\n");
+            reset = true;
+        }
+
+        /* Follow-device mode: settle the host's buffer size to the device's
+         * actual quantum.  audio_on_process records the live quantum; when it
+         * differs from what the host negotiated, remember it durably and ask
+         * for a reset so the host re-queries GetBufferSize.  last_reset_quantum
+         * fires the reset once per distinct value (no loop if the host
+         * ignores the request). */
+        if (This->pipeasio_follow_device_clock && This->host_driver_state == Running)
+        {
+            LONG q = (LONG)audio_observed_quantum(This->audio_client);
+            if (q && q != This->host_current_buffersize && q != last_reset_quantum)
+            {
+                atomic_store(&g_follower_quantum, q);
+                last_reset_quantum = q;
+                TRACE("config watcher: device quantum %ld, re-negotiating buffer\n", (long)q);
+                reset = true;
+            }
+        }
+
+        if (reset && This->host_driver_state == Running && This->host_callbacks)
+        {
+            TRACE("config watcher: requesting host reset\n");
+            if (This->host_callbacks->sendNotification(1, 3, 0, 0))
+                This->host_callbacks->sendNotification(3, 0, 0, 0);
+        }
+    }
+    return 0;
+}
+
+/* Signal, join, and dispose the config watcher.  Idempotent: safe to call when
+ * the watcher was never started or already stopped. */
+static void
+stop_config_watch(IPipeASIOImpl *This)
+{
+    if (This->config_watch_thread)
+    {
+        if (This->config_watch_stop)
+            SetEvent(This->config_watch_stop);
+        WaitForSingleObject(This->config_watch_thread, INFINITE);
+        CloseHandle(This->config_watch_thread);
+        This->config_watch_thread = NULL;
+    }
+    if (This->config_watch_stop)
+    {
+        CloseHandle(This->config_watch_stop);
+        This->config_watch_stop = NULL;
+    }
 }
 
 /*
@@ -408,10 +565,11 @@ HIDDEN ULONG STDMETHODCALLTYPE AddRef(LPPIPEASIO iface)
  *  Implies:    Stop() and DisposeBuffers()
  */
 
-HIDDEN ULONG STDMETHODCALLTYPE Release(LPPIPEASIO iface)
+HIDDEN ULONG STDMETHODCALLTYPE
+Release(LPPIPEASIO iface)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl *)iface;
-    ULONG            ref = InterlockedDecrement(&This->ref);
+    IPipeASIOImpl *This = (IPipeASIOImpl *)iface;
+    ULONG          ref  = InterlockedDecrement(&This->ref);
 
     TRACE("iface: %p, ref count is %u\n", iface, (unsigned)ref);
 
@@ -425,21 +583,23 @@ HIDDEN ULONG STDMETHODCALLTYPE Release(LPPIPEASIO iface)
         /* just for good measure we deinitialize IOChannel structures and unregister ports */
         for (int i = 0; i < This->pipeasio_number_inputs; i++)
         {
-            audio_port_unregister (This->audio_client, This->input_channel[i].port);
+            audio_port_unregister(This->audio_client, This->input_channel[i].port);
             This->input_channel[i].active = false;
-            This->input_channel[i].port = NULL;
+            This->input_channel[i].port   = NULL;
         }
         for (int i = 0; i < This->pipeasio_number_outputs; i++)
         {
-            audio_port_unregister (This->audio_client, This->output_channel[i].port);
+            audio_port_unregister(This->audio_client, This->output_channel[i].port);
             This->output_channel[i].active = false;
-            This->output_channel[i].port = NULL;
+            This->output_channel[i].port   = NULL;
         }
         This->host_active_inputs = This->host_active_outputs = 0;
-        TRACE("%i IOChannel structures released\n", This->pipeasio_number_inputs + This->pipeasio_number_outputs);
+        TRACE("%i IOChannel structures released\n",
+              This->pipeasio_number_inputs + This->pipeasio_number_outputs);
 
-        audio_free (This->phys_output_ports);
-        audio_free (This->phys_input_ports);
+        audio_free(This->phys_output_ports);
+        audio_free(This->phys_input_ports);
+        stop_config_watch(This);
         audio_close(This->audio_client);
         if (This->input_channel)
             HeapFree(GetProcessHeap(), 0, This->input_channel);
@@ -458,13 +618,14 @@ HIDDEN ULONG STDMETHODCALLTYPE Release(LPPIPEASIO iface)
  *  Returns:    0 on error, and 1 on success
  */
 
-DEFINE_THISCALL_WRAPPER(Init,8)
-HIDDEN LONG STDMETHODCALLTYPE Init(LPPIPEASIO iface, void *sysRef)
+DEFINE_THISCALL_WRAPPER(Init, 8)
+HIDDEN LONG STDMETHODCALLTYPE
+Init(LPPIPEASIO iface, void *sysRef)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl *)iface;
-    uint32_t   audio_status;
-    uint32_t  audio_options = AUDIO_NULL_OPTION;
-    int             i;
+    IPipeASIOImpl *This = (IPipeASIOImpl *)iface;
+    uint32_t       audio_status;
+    uint32_t       audio_options = AUDIO_NULL_OPTION;
+    int            i;
 
     This->sys_ref = sysRef;
     /* Do NOT mlockall(MCL_FUTURE) here.  Under Wine it forces every
@@ -488,6 +649,7 @@ HIDDEN LONG STDMETHODCALLTYPE Init(LPPIPEASIO iface, void *sysRef)
     TRACE("audio client opened as: '%s'\n", audio_get_client_name(This->audio_client));
 
     audio_set_forced_rate(This->audio_client, (audio_nframes_t)This->pipeasio_sample_rate);
+    audio_set_follow_device(This->audio_client, This->pipeasio_follow_device_clock);
 
     This->host_sample_rate = audio_get_sample_rate(This->audio_client);
     /* Seed the reported buffer size from the user's configured preferred size.
@@ -495,48 +657,69 @@ HIDDEN LONG STDMETHODCALLTYPE Init(LPPIPEASIO iface, void *sysRef)
      * quantum via CreateBuffers — so the fixed-size path must report the
      * configured value, not the backend default. */
     This->host_current_buffersize = This->pipeasio_preferred_buffersize;
+    if (This->pipeasio_follow_device_clock)
+    {
+        /* Follower mode: prefer the device quantum observed on a previous run
+         * (set by config_watch_proc); the configured size is only the first
+         * guess until the watcher settles it. */
+        LONG hint = atomic_load(&g_follower_quantum);
+        if (hint)
+            This->host_current_buffersize = hint;
+    }
 
     /* Allocate IOChannel structures (zeroed — audio_buffer and active
      * must start NULL/false before CreateBuffers wires them up). */
     This->input_channel = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-                                    (This->pipeasio_number_inputs + This->pipeasio_number_outputs) * sizeof(IOChannel));
+                                    (This->pipeasio_number_inputs + This->pipeasio_number_outputs)
+                                            * sizeof(IOChannel));
     if (!This->input_channel)
     {
         audio_close(This->audio_client);
-        ERR("Unable to allocate IOChannel structures for %i channels\n", This->pipeasio_number_inputs);
+        ERR("Unable to allocate IOChannel structures for %i channels\n",
+            This->pipeasio_number_inputs);
         return 0;
     }
     This->output_channel = This->input_channel + This->pipeasio_number_inputs;
-    TRACE("%i IOChannel structures allocated\n", This->pipeasio_number_inputs + This->pipeasio_number_outputs);
+    TRACE("%i IOChannel structures allocated\n",
+          This->pipeasio_number_inputs + This->pipeasio_number_outputs);
 
     /* Get and count physical device ports */
-    This->phys_input_ports = audio_get_ports(This->audio_client, NULL, NULL, AUDIO_PORT_IS_PHYSICAL | AUDIO_PORT_IS_OUTPUT);
-    for (This->num_phys_input_ports = 0; This->phys_input_ports && This->phys_input_ports[This->num_phys_input_ports]; This->num_phys_input_ports++)
+    This->phys_input_ports = audio_get_ports(This->audio_client, NULL, NULL,
+                                             AUDIO_PORT_IS_PHYSICAL | AUDIO_PORT_IS_OUTPUT);
+    for (This->num_phys_input_ports = 0;
+         This->phys_input_ports && This->phys_input_ports[This->num_phys_input_ports];
+         This->num_phys_input_ports++)
         ;
-    This->phys_output_ports = audio_get_ports(This->audio_client, NULL, NULL, AUDIO_PORT_IS_PHYSICAL | AUDIO_PORT_IS_INPUT);
-    for (This->num_phys_output_ports = 0; This->phys_output_ports && This->phys_output_ports[This->num_phys_output_ports]; This->num_phys_output_ports++)
+    This->phys_output_ports = audio_get_ports(This->audio_client, NULL, NULL,
+                                              AUDIO_PORT_IS_PHYSICAL | AUDIO_PORT_IS_INPUT);
+    for (This->num_phys_output_ports = 0;
+         This->phys_output_ports && This->phys_output_ports[This->num_phys_output_ports];
+         This->num_phys_output_ports++)
         ;
 
     /* Initialize IOChannel structures */
     for (i = 0; i < This->pipeasio_number_inputs; i++)
     {
         This->input_channel[i].active = false;
-        This->input_channel[i].port = NULL;
+        This->input_channel[i].port   = NULL;
         snprintf(This->input_channel[i].port_name, PIPEASIO_MAX_NAME_LENGTH, "in_%i", i + 1);
-        This->input_channel[i].port = audio_port_register(This->audio_client,
-            This->input_channel[i].port_name, AUDIO_DEFAULT_TYPE, AUDIO_PORT_IS_INPUT, i);
+        This->input_channel[i].port
+                = audio_port_register(This->audio_client, This->input_channel[i].port_name,
+                                      AUDIO_DEFAULT_TYPE, AUDIO_PORT_IS_INPUT, i);
         /* TRACE("IOChannel structure initialized for input %d: '%s'\n", i, This->input_channel[i].port_name); */
     }
     for (i = 0; i < This->pipeasio_number_outputs; i++)
     {
         This->output_channel[i].active = false;
-        This->output_channel[i].port = NULL;
+        This->output_channel[i].port   = NULL;
         snprintf(This->output_channel[i].port_name, PIPEASIO_MAX_NAME_LENGTH, "out_%i", i + 1);
-        This->output_channel[i].port = audio_port_register(This->audio_client,
-            This->output_channel[i].port_name, AUDIO_DEFAULT_TYPE, AUDIO_PORT_IS_OUTPUT, i);
+        This->output_channel[i].port
+                = audio_port_register(This->audio_client, This->output_channel[i].port_name,
+                                      AUDIO_DEFAULT_TYPE, AUDIO_PORT_IS_OUTPUT, i);
         /* TRACE("IOChannel structure initialized for output %d: '%s'\n", i, This->output_channel[i].port_name); */
     }
-    TRACE("%i IOChannel structures initialized\n", This->pipeasio_number_inputs + This->pipeasio_number_outputs);
+    TRACE("%i IOChannel structures initialized\n",
+          This->pipeasio_number_inputs + This->pipeasio_number_outputs);
 
     if (!audio_set_buffer_size_callback(This->audio_client, buffer_size_callback, This))
     {
@@ -545,7 +728,7 @@ HIDDEN LONG STDMETHODCALLTYPE Init(LPPIPEASIO iface, void *sysRef)
         ERR("Unable to register buffer size change callback\n");
         return 0;
     }
-    
+
     if (!audio_set_latency_callback(This->audio_client, latency_callback, This))
     {
         audio_close(This->audio_client);
@@ -562,7 +745,7 @@ HIDDEN LONG STDMETHODCALLTYPE Init(LPPIPEASIO iface, void *sysRef)
         return 0;
     }
 
-    if (!audio_set_sample_rate_callback (This->audio_client, sample_rate_callback, This))
+    if (!audio_set_sample_rate_callback(This->audio_client, sample_rate_callback, This))
     {
         audio_close(This->audio_client);
         HeapFree(GetProcessHeap(), 0, This->input_channel);
@@ -571,7 +754,7 @@ HIDDEN LONG STDMETHODCALLTYPE Init(LPPIPEASIO iface, void *sysRef)
     }
 
     This->host_driver_state = Initialized;
-    TRACE("PipeASIO 0.%.1f initialized\n",(float) This->host_version / 10);
+    TRACE("PipeASIO 0.%.1f initialized\n", (float)This->host_version / 10);
     return 1;
 }
 
@@ -580,8 +763,9 @@ HIDDEN LONG STDMETHODCALLTYPE Init(LPPIPEASIO iface, void *sysRef)
  *  Function:    Returns the driver name in name
  */
 
-DEFINE_THISCALL_WRAPPER(GetDriverName,8)
-HIDDEN void STDMETHODCALLTYPE GetDriverName(LPPIPEASIO iface, char *name)
+DEFINE_THISCALL_WRAPPER(GetDriverName, 8)
+HIDDEN void STDMETHODCALLTYPE
+GetDriverName(LPPIPEASIO iface, char *name)
 {
     TRACE("iface: %p, name: %p\n", iface, name);
     strcpy(name, "PipeASIO");
@@ -593,10 +777,11 @@ HIDDEN void STDMETHODCALLTYPE GetDriverName(LPPIPEASIO iface, char *name)
  *  Function:    Returns the driver version number
  */
 
-DEFINE_THISCALL_WRAPPER(GetDriverVersion,4)
-HIDDEN LONG STDMETHODCALLTYPE GetDriverVersion(LPPIPEASIO iface)
+DEFINE_THISCALL_WRAPPER(GetDriverVersion, 4)
+HIDDEN LONG STDMETHODCALLTYPE
+GetDriverVersion(LPPIPEASIO iface)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl*)iface;
+    IPipeASIOImpl *This = (IPipeASIOImpl *)iface;
 
     TRACE("iface: %p\n", iface);
     return This->host_version;
@@ -607,8 +792,9 @@ HIDDEN LONG STDMETHODCALLTYPE GetDriverVersion(LPPIPEASIO iface)
  *  Function:    Returns an error message for the last occured error in string
  */
 
-DEFINE_THISCALL_WRAPPER(GetErrorMessage,8)
-HIDDEN void STDMETHODCALLTYPE GetErrorMessage(LPPIPEASIO iface, char *string)
+DEFINE_THISCALL_WRAPPER(GetErrorMessage, 8)
+HIDDEN void STDMETHODCALLTYPE
+GetErrorMessage(LPPIPEASIO iface, char *string)
 {
     TRACE("iface: %p, string: %p)\n", iface, string);
     strcpy(string, "PipeASIO does not return error messages\n");
@@ -622,12 +808,13 @@ HIDDEN void STDMETHODCALLTYPE GetErrorMessage(LPPIPEASIO iface, char *string)
  *               -999 if the audio backend fails to start
  */
 
-DEFINE_THISCALL_WRAPPER(Start,4)
-HIDDEN LONG STDMETHODCALLTYPE Start(LPPIPEASIO iface)
+DEFINE_THISCALL_WRAPPER(Start, 4)
+HIDDEN LONG STDMETHODCALLTYPE
+Start(LPPIPEASIO iface)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl*)iface;
-    int             i;
-    DWORD           time;
+    IPipeASIOImpl *This = (IPipeASIOImpl *)iface;
+    int            i;
+    DWORD          time;
 
     TRACE("iface: %p\n", iface);
 
@@ -635,36 +822,38 @@ HIDDEN LONG STDMETHODCALLTYPE Start(LPPIPEASIO iface)
         return -1000;
 
     /* Zero the audio buffer */
-    for (i = 0; i < (This->pipeasio_number_inputs + This->pipeasio_number_outputs) * 2 * This->host_current_buffersize; i++)
+    for (i = 0; i < (This->pipeasio_number_inputs + This->pipeasio_number_outputs) * 2
+                            * This->host_current_buffersize;
+         i++)
         This->callback_audio_buffer[i] = 0;
 
     /* prime the callback by preprocessing one outbound host bufffer */
-    This->host_buffer_index =  0;
+    This->host_buffer_index   = 0;
     This->host_num_samples.hi = This->host_num_samples.lo = 0;
 
     /* GetTickCount, not timeGetTime — see process_callback for the
      * Wine-winmm RT-thread smash details. Same DWORD ms return type so
      * drop-in. (This call site is on the main thread, but keep both
      * sites consistent.) */
-    time = GetTickCount();
+    time                     = GetTickCount();
     This->host_time_stamp.lo = time * 1000000;
-    This->host_time_stamp.hi = ((unsigned long long) time * 1000000) >> 32;
+    This->host_time_stamp.hi = ((unsigned long long)time * 1000000) >> 32;
 
     if (This->host_time_info_mode) /* use the newer swapBuffersWithTimeInfo method if supported */
     {
-        This->host_time._2 = 1.0;  /* ASIOTime.timeInfo.speed — normal-rate playback */
+        This->host_time._2            = 1.0; /* ASIOTime.timeInfo.speed — normal-rate playback */
         This->host_time.numSamples.lo = This->host_time.numSamples.hi = 0;
-        This->host_time.timeStamp.lo = This->host_time_stamp.lo;
-        This->host_time.timeStamp.hi = This->host_time_stamp.hi;
-        This->host_time.sampleRate = This->host_sample_rate;
-        This->host_time.flags = 0x7;
+        This->host_time.timeStamp.lo                                  = This->host_time_stamp.lo;
+        This->host_time.timeStamp.hi                                  = This->host_time_stamp.hi;
+        This->host_time.sampleRate                                    = This->host_sample_rate;
+        This->host_time.flags                                         = 0x7;
 
         if (This->host_can_time_code) /* addionally use time code if supported */
         {
-            This->host_time.speedForTimeCode = 1; /* FIXME */
+            This->host_time.speedForTimeCode        = 1; /* FIXME */
             This->host_time.timeStampForTimeCode.lo = This->host_time_stamp.lo;
             This->host_time.timeStampForTimeCode.hi = This->host_time_stamp.hi;
-            This->host_time.flagsForTimeCode = ~(0x3);
+            This->host_time.flagsForTimeCode        = ~(0x3);
         }
         This->host_callbacks->swapBuffersWithTimeInfo(&This->host_time, This->host_buffer_index, 1);
     }
@@ -688,10 +877,11 @@ HIDDEN LONG STDMETHODCALLTYPE Start(LPPIPEASIO iface)
  *  Note:       swapBuffers() must not called after returning
  */
 
-DEFINE_THISCALL_WRAPPER(Stop,4)
-HIDDEN LONG STDMETHODCALLTYPE Stop(LPPIPEASIO iface)
+DEFINE_THISCALL_WRAPPER(Stop, 4)
+HIDDEN LONG STDMETHODCALLTYPE
+Stop(LPPIPEASIO iface)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl*)iface;
+    IPipeASIOImpl *This = (IPipeASIOImpl *)iface;
 
     TRACE("iface: %p\n", iface);
 
@@ -710,17 +900,19 @@ HIDDEN LONG STDMETHODCALLTYPE Stop(LPPIPEASIO iface)
  *  Returns:    -1000 if no channels are available, otherwise AES_OK
  */
 
-DEFINE_THISCALL_WRAPPER(GetChannels,12)
-HIDDEN LONG STDMETHODCALLTYPE GetChannels (LPPIPEASIO iface, LONG *numInputChannels, LONG *numOutputChannels)
+DEFINE_THISCALL_WRAPPER(GetChannels, 12)
+HIDDEN LONG STDMETHODCALLTYPE
+GetChannels(LPPIPEASIO iface, LONG *numInputChannels, LONG *numOutputChannels)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl*)iface;
+    IPipeASIOImpl *This = (IPipeASIOImpl *)iface;
 
     if (!numInputChannels || !numOutputChannels)
         return -998;
 
-    *numInputChannels = This->pipeasio_number_inputs;
+    *numInputChannels  = This->pipeasio_number_inputs;
     *numOutputChannels = This->pipeasio_number_outputs;
-    TRACE("iface: %p, inputs: %i, outputs: %i\n", iface, This->pipeasio_number_inputs, This->pipeasio_number_outputs);
+    TRACE("iface: %p, inputs: %i, outputs: %i\n", iface, This->pipeasio_number_inputs,
+          This->pipeasio_number_outputs);
     return 0;
 }
 
@@ -730,11 +922,12 @@ HIDDEN LONG STDMETHODCALLTYPE GetChannels (LPPIPEASIO iface, LONG *numInputChann
  *  Returns:    -1000 if no IO is available, otherwise AES_OK
  */
 
-DEFINE_THISCALL_WRAPPER(GetLatencies,12)
-HIDDEN LONG STDMETHODCALLTYPE GetLatencies(LPPIPEASIO iface, LONG *inputLatency, LONG *outputLatency)
+DEFINE_THISCALL_WRAPPER(GetLatencies, 12)
+HIDDEN LONG STDMETHODCALLTYPE
+GetLatencies(LPPIPEASIO iface, LONG *inputLatency, LONG *outputLatency)
 {
-    IPipeASIOImpl           *This = (IPipeASIOImpl*)iface;
-    audio_latency_range_t    range;
+    IPipeASIOImpl        *This = (IPipeASIOImpl *)iface;
+    audio_latency_range_t range;
 
     if (!inputLatency || !outputLatency)
         return -998;
@@ -746,7 +939,8 @@ HIDDEN LONG STDMETHODCALLTYPE GetLatencies(LPPIPEASIO iface, LONG *inputLatency,
     *inputLatency = range.max;
     audio_port_get_latency_range(This->output_channel[0].port, AUDIO_PLAYBACK_LATENCY, &range);
     *outputLatency = range.max;
-    TRACE("iface: %p, input latency: %d, output latency: %d\n", iface, (int)*inputLatency, (int)*outputLatency);
+    TRACE("iface: %p, input latency: %d, output latency: %d\n", iface, (int)*inputLatency,
+          (int)*outputLatency);
 
     return 0;
 }
@@ -758,30 +952,35 @@ HIDDEN LONG STDMETHODCALLTYPE GetLatencies(LPPIPEASIO iface, LONG *inputLatency,
  *  Returns:    -1000 on missing IO
  */
 
-DEFINE_THISCALL_WRAPPER(GetBufferSize,20)
-HIDDEN LONG STDMETHODCALLTYPE GetBufferSize(LPPIPEASIO iface, LONG *minSize, LONG *maxSize, LONG *preferredSize, LONG *granularity)
+DEFINE_THISCALL_WRAPPER(GetBufferSize, 20)
+HIDDEN LONG STDMETHODCALLTYPE
+GetBufferSize(LPPIPEASIO iface, LONG *minSize, LONG *maxSize, LONG *preferredSize,
+              LONG *granularity)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl*)iface;
+    IPipeASIOImpl *This = (IPipeASIOImpl *)iface;
 
-    TRACE("iface: %p, minSize: %p, maxSize: %p, preferredSize: %p, granularity: %p\n", iface, minSize, maxSize, preferredSize, granularity);
+    TRACE("iface: %p, minSize: %p, maxSize: %p, preferredSize: %p, granularity: %p\n", iface,
+          minSize, maxSize, preferredSize, granularity);
 
     if (!minSize || !maxSize || !preferredSize || !granularity)
         return -998;
 
-    if (This->pipeasio_fixed_buffersize)
+    if (This->pipeasio_fixed_buffersize || This->pipeasio_follow_device_clock)
     {
         *minSize = *maxSize = *preferredSize = This->host_current_buffersize;
-        *granularity = 0;
+        *granularity                         = 0;
         TRACE("Buffersize fixed at %d\n", (int)This->host_current_buffersize);
         return 0;
     }
 
-    *minSize = PIPEASIO_MINIMUM_BUFFERSIZE;
-    *maxSize = PIPEASIO_MAXIMUM_BUFFERSIZE;
+    *minSize       = PIPEASIO_MINIMUM_BUFFERSIZE;
+    *maxSize       = PIPEASIO_MAXIMUM_BUFFERSIZE;
     *preferredSize = This->pipeasio_preferred_buffersize;
-    *granularity = -1;
-    TRACE("The host can control buffersize\nMinimum: %d, maximum: %d, preferred: %d, granularity: %d, current: %d\n",
-          (int)*minSize, (int)*maxSize, (int)*preferredSize, (int)*granularity, (int)This->host_current_buffersize);
+    *granularity   = -1;
+    TRACE("The host can control buffersize\nMinimum: %d, maximum: %d, preferred: %d, granularity: "
+          "%d, current: %d\n",
+          (int)*minSize, (int)*maxSize, (int)*preferredSize, (int)*granularity,
+          (int)This->host_current_buffersize);
     return 0;
 }
 
@@ -791,12 +990,14 @@ HIDDEN LONG STDMETHODCALLTYPE GetBufferSize(LPPIPEASIO iface, LONG *minSize, LON
  *  Returns:    -995 if SR isn't available, -1000 on missing IO
  */
 
-DEFINE_THISCALL_WRAPPER(CanSampleRate,12)
-HIDDEN LONG STDMETHODCALLTYPE CanSampleRate(LPPIPEASIO iface, double sampleRate)
+DEFINE_THISCALL_WRAPPER(CanSampleRate, 12)
+HIDDEN LONG STDMETHODCALLTYPE
+CanSampleRate(LPPIPEASIO iface, double sampleRate)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl*)iface;
+    IPipeASIOImpl *This = (IPipeASIOImpl *)iface;
 
-    TRACE("iface: %p, Samplerate = %li, requested samplerate = %li\n", iface, (long) This->host_sample_rate, (long) sampleRate);
+    TRACE("iface: %p, Samplerate = %li, requested samplerate = %li\n", iface,
+          (long)This->host_sample_rate, (long)sampleRate);
 
     if (sampleRate != This->host_sample_rate)
         return -995;
@@ -810,12 +1011,13 @@ HIDDEN LONG STDMETHODCALLTYPE CanSampleRate(LPPIPEASIO iface, double sampleRate)
  *  Returns:    -995 if SR is unknown, -1000 on missing IO
  */
 
-DEFINE_THISCALL_WRAPPER(GetSampleRate,8)
-HIDDEN LONG STDMETHODCALLTYPE GetSampleRate(LPPIPEASIO iface, double *sampleRate)
+DEFINE_THISCALL_WRAPPER(GetSampleRate, 8)
+HIDDEN LONG STDMETHODCALLTYPE
+GetSampleRate(LPPIPEASIO iface, double *sampleRate)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl*)iface;
+    IPipeASIOImpl *This = (IPipeASIOImpl *)iface;
 
-    TRACE("iface: %p, Sample rate is %i\n", iface, (int) This->host_sample_rate);
+    TRACE("iface: %p, Sample rate is %i\n", iface, (int)This->host_sample_rate);
 
     if (!sampleRate)
         return -998;
@@ -832,10 +1034,11 @@ HIDDEN LONG STDMETHODCALLTYPE GetSampleRate(LPPIPEASIO iface, double *sampleRate
  *              -1000 on missing IO
  */
 
-DEFINE_THISCALL_WRAPPER(SetSampleRate,12)
-HIDDEN LONG STDMETHODCALLTYPE SetSampleRate(LPPIPEASIO iface, double sampleRate)
+DEFINE_THISCALL_WRAPPER(SetSampleRate, 12)
+HIDDEN LONG STDMETHODCALLTYPE
+SetSampleRate(LPPIPEASIO iface, double sampleRate)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl*)iface;
+    IPipeASIOImpl *This = (IPipeASIOImpl *)iface;
 
     TRACE("iface: %p, Sample rate %f requested\n", iface, sampleRate);
 
@@ -853,10 +1056,11 @@ HIDDEN LONG STDMETHODCALLTYPE SetSampleRate(LPPIPEASIO iface, double sampleRate)
  *  Returns:    -1000 on missing IO
  */
 
-DEFINE_THISCALL_WRAPPER(GetClockSources,12)
-HIDDEN LONG STDMETHODCALLTYPE GetClockSources(LPPIPEASIO iface, void *clocks, LONG *numSources)
+DEFINE_THISCALL_WRAPPER(GetClockSources, 12)
+HIDDEN LONG STDMETHODCALLTYPE
+GetClockSources(LPPIPEASIO iface, void *clocks, LONG *numSources)
 {
-    LONG *lclocks = (LONG*)clocks;
+    LONG *lclocks = (LONG *)clocks;
 
     TRACE("iface: %p, clocks: %p, numSources: %p\n", iface, clocks, numSources);
 
@@ -867,7 +1071,7 @@ HIDDEN LONG STDMETHODCALLTYPE GetClockSources(LPPIPEASIO iface, void *clocks, LO
     *lclocks++ = -1;
     *lclocks++ = -1;
     *lclocks++ = 1;
-    strcpy((char*)lclocks, "Internal");
+    strcpy((char *)lclocks, "Internal");
     *numSources = 1;
     return 0;
 }
@@ -881,8 +1085,9 @@ HIDDEN LONG STDMETHODCALLTYPE GetClockSources(LPPIPEASIO iface, void *clocks, LO
  *              -995 should not be returned
  */
 
-DEFINE_THISCALL_WRAPPER(SetClockSource,8)
-HIDDEN LONG STDMETHODCALLTYPE SetClockSource(LPPIPEASIO iface, LONG index)
+DEFINE_THISCALL_WRAPPER(SetClockSource, 8)
+HIDDEN LONG STDMETHODCALLTYPE
+SetClockSource(LPPIPEASIO iface, LONG index)
 {
     TRACE("iface: %p, index: %d\n", iface, (int)index);
 
@@ -900,10 +1105,11 @@ HIDDEN LONG STDMETHODCALLTYPE SetClockSource(LPPIPEASIO iface, LONG index)
  *              -996 on missing clock
  */
 
-DEFINE_THISCALL_WRAPPER(GetSamplePosition,12)
-HIDDEN LONG STDMETHODCALLTYPE GetSamplePosition(LPPIPEASIO iface, w_int64_t *sPos, w_int64_t *tStamp)
+DEFINE_THISCALL_WRAPPER(GetSamplePosition, 12)
+HIDDEN LONG STDMETHODCALLTYPE
+GetSamplePosition(LPPIPEASIO iface, w_int64_t *sPos, w_int64_t *tStamp)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl*)iface;
+    IPipeASIOImpl *This = (IPipeASIOImpl *)iface;
 
     TRACE("iface: %p, sPos: %p, tStamp: %p\n", iface, sPos, tStamp);
 
@@ -912,8 +1118,8 @@ HIDDEN LONG STDMETHODCALLTYPE GetSamplePosition(LPPIPEASIO iface, w_int64_t *sPo
 
     tStamp->lo = This->host_time_stamp.lo;
     tStamp->hi = This->host_time_stamp.hi;
-    sPos->lo = This->host_num_samples.lo;
-    sPos->hi = 0; /* FIXME */
+    sPos->lo   = This->host_num_samples.lo;
+    sPos->hi   = 0; /* FIXME */
 
     return 0;
 }
@@ -924,24 +1130,29 @@ HIDDEN LONG STDMETHODCALLTYPE GetSamplePosition(LPPIPEASIO iface, w_int64_t *sPo
  *  Returns:    -1000 on missing IO
  */
 
-DEFINE_THISCALL_WRAPPER(GetChannelInfo,8)
-HIDDEN LONG STDMETHODCALLTYPE GetChannelInfo(LPPIPEASIO iface, void *info)
+DEFINE_THISCALL_WRAPPER(GetChannelInfo, 8)
+HIDDEN LONG STDMETHODCALLTYPE
+GetChannelInfo(LPPIPEASIO iface, void *info)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl*)iface;
-    LONG *linfo = (LONG*)info;
+    IPipeASIOImpl *This  = (IPipeASIOImpl *)iface;
+    LONG          *linfo = (LONG *)info;
 
     const LONG channelNumber = *linfo++;
-    const LONG isInputType = *linfo++;
+    const LONG isInputType   = *linfo++;
 
     /* TRACE("(iface: %p, info: %p\n", iface, info); */
 
-    if (channelNumber < 0 || (isInputType ? channelNumber >= This->pipeasio_number_inputs : channelNumber >= This->pipeasio_number_outputs))
+    if (channelNumber < 0
+        || (isInputType ? channelNumber >= This->pipeasio_number_inputs
+                        : channelNumber >= This->pipeasio_number_outputs))
         return -998;
 
     *linfo++ = (isInputType ? This->input_channel : This->output_channel)[channelNumber].active;
     *linfo++ = 0;
     *linfo++ = 19;
-    memcpy(linfo, (isInputType ? This->input_channel : This->output_channel)[channelNumber].port_name, PIPEASIO_MAX_NAME_LENGTH);
+    memcpy(linfo,
+           (isInputType ? This->input_channel : This->output_channel)[channelNumber].port_name,
+           PIPEASIO_MAX_NAME_LENGTH);
 
     return 0;
 }
@@ -958,14 +1169,17 @@ HIDDEN LONG STDMETHODCALLTYPE GetChannelInfo(LPPIPEASIO iface, void *info)
  *              -1000 on missing IO
  */
 
-DEFINE_THISCALL_WRAPPER(CreateBuffers,20)
-HIDDEN LONG STDMETHODCALLTYPE CreateBuffers(LPPIPEASIO iface, BufferInformation *bufferInfo, LONG numChannels, LONG bufferSize, Callbacks *callbacks)
+DEFINE_THISCALL_WRAPPER(CreateBuffers, 20)
+HIDDEN LONG STDMETHODCALLTYPE
+CreateBuffers(LPPIPEASIO iface, BufferInformation *bufferInfo, LONG numChannels, LONG bufferSize,
+              Callbacks *callbacks)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl*)iface;
-    BufferInformation  *bufferInfoPerChannel = bufferInfo;
-    int             i, j, k;
+    IPipeASIOImpl     *This                 = (IPipeASIOImpl *)iface;
+    BufferInformation *bufferInfoPerChannel = bufferInfo;
+    int                i, j, k;
 
-    TRACE("iface: %p, bufferInfo: %p, numChannels: %d, bufferSize: %d, callbacks: %p\n", iface, bufferInfo, (int)numChannels, (int)bufferSize, callbacks);
+    TRACE("iface: %p, bufferInfo: %p, numChannels: %d, bufferSize: %d, callbacks: %p\n", iface,
+          bufferInfo, (int)numChannels, (int)bufferSize, callbacks);
 
     if (This->host_driver_state != Initialized)
         return -1000;
@@ -990,14 +1204,13 @@ HIDDEN LONG STDMETHODCALLTYPE CreateBuffers(LPPIPEASIO iface, BufferInformation 
                 || bufferInfoPerChannel->channelNumber >= This->pipeasio_number_inputs)
             {
                 WARN("Invalid input channelNumber %ld (max %d)\n",
-                     (long)bufferInfoPerChannel->channelNumber,
-                     This->pipeasio_number_inputs - 1);
+                     (long)bufferInfoPerChannel->channelNumber, This->pipeasio_number_inputs - 1);
                 return -997;
             }
         }
         else
         {
-            if (k++  >= This->pipeasio_number_outputs)
+            if (k++ >= This->pipeasio_number_outputs)
             {
                 WARN("Invalid output channel requested (too many)\n");
                 return -997;
@@ -1006,15 +1219,14 @@ HIDDEN LONG STDMETHODCALLTYPE CreateBuffers(LPPIPEASIO iface, BufferInformation 
                 || bufferInfoPerChannel->channelNumber >= This->pipeasio_number_outputs)
             {
                 WARN("Invalid output channelNumber %ld (max %d)\n",
-                     (long)bufferInfoPerChannel->channelNumber,
-                     This->pipeasio_number_outputs - 1);
+                     (long)bufferInfoPerChannel->channelNumber, This->pipeasio_number_outputs - 1);
                 return -997;
             }
         }
     }
 
     /* set buf_size */
-    if (This->pipeasio_fixed_buffersize)
+    if (This->pipeasio_fixed_buffersize || This->pipeasio_follow_device_clock)
     {
         if (This->host_current_buffersize != bufferSize)
             return -997;
@@ -1032,9 +1244,9 @@ HIDDEN LONG STDMETHODCALLTYPE CreateBuffers(LPPIPEASIO iface, BufferInformation 
     }
     else
     { /* fail if not a power of two and if out of range */
-        if (!(bufferSize > 0 && !(bufferSize&(bufferSize-1))
-                && bufferSize >= PIPEASIO_MINIMUM_BUFFERSIZE
-                && bufferSize <= PIPEASIO_MAXIMUM_BUFFERSIZE))
+        if (!(bufferSize > 0 && !(bufferSize & (bufferSize - 1))
+              && bufferSize >= PIPEASIO_MINIMUM_BUFFERSIZE
+              && bufferSize <= PIPEASIO_MAXIMUM_BUFFERSIZE))
         {
             WARN("Invalid buffersize %d requested\n", (int)bufferSize);
             return -997;
@@ -1058,7 +1270,7 @@ HIDDEN LONG STDMETHODCALLTYPE CreateBuffers(LPPIPEASIO iface, BufferInformation 
         }
     }
 
-    This->host_callbacks = callbacks;
+    This->host_callbacks      = callbacks;
     This->host_time_info_mode = This->host_can_time_code = FALSE;
 
     if (This->host_callbacks->sendNotification(7, 0, 0, 0))
@@ -1071,36 +1283,39 @@ HIDDEN LONG STDMETHODCALLTYPE CreateBuffers(LPPIPEASIO iface, BufferInformation 
     /* Allocate audio buffers */
 
     const size_t cb_bytes = pipeasio_host_callback_size_bytes(
-        This->pipeasio_number_inputs, This->pipeasio_number_outputs,
-        This->host_current_buffersize, sizeof(audio_sample_t));
+            This->pipeasio_number_inputs, This->pipeasio_number_outputs,
+            This->host_current_buffersize, sizeof(audio_sample_t));
     This->callback_audio_buffer = HeapAlloc(GetProcessHeap(), 0, cb_bytes);
     if (!This->callback_audio_buffer)
     {
-        ERR("Unable to allocate %i audio buffers\n", This->pipeasio_number_inputs + This->pipeasio_number_outputs);
+        ERR("Unable to allocate %i audio buffers\n",
+            This->pipeasio_number_inputs + This->pipeasio_number_outputs);
         return -994;
     }
     TRACE("%i audio buffers allocated (%zu kB) base=%p end=%p\n",
-          This->pipeasio_number_inputs + This->pipeasio_number_outputs,
-          cb_bytes / 1024,
-          This->callback_audio_buffer,
-          (void *)((char *)This->callback_audio_buffer + cb_bytes));
+          This->pipeasio_number_inputs + This->pipeasio_number_outputs, cb_bytes / 1024,
+          This->callback_audio_buffer, (void *)((char *)This->callback_audio_buffer + cb_bytes));
 
     for (i = 0; i < This->pipeasio_number_inputs; i++)
-        This->input_channel[i].audio_buffer = This->callback_audio_buffer
-            + pipeasio_host_input_offset_samples(i, This->host_current_buffersize);
+        This->input_channel[i].audio_buffer
+                = This->callback_audio_buffer
+                  + pipeasio_host_input_offset_samples(i, This->host_current_buffersize);
     for (i = 0; i < This->pipeasio_number_outputs; i++)
-        This->output_channel[i].audio_buffer = This->callback_audio_buffer
-            + pipeasio_host_output_offset_samples(i, This->pipeasio_number_inputs,
-                                                  This->host_current_buffersize);
+        This->output_channel[i].audio_buffer
+                = This->callback_audio_buffer
+                  + pipeasio_host_output_offset_samples(i, This->pipeasio_number_inputs,
+                                                        This->host_current_buffersize);
 
     /* initialize BufferInformation structures */
-    bufferInfoPerChannel = bufferInfo;
+    bufferInfoPerChannel     = bufferInfo;
     This->host_active_inputs = This->host_active_outputs = 0;
 
-    for (i = 0; i < This->pipeasio_number_inputs; i++) {
+    for (i = 0; i < This->pipeasio_number_inputs; i++)
+    {
         This->input_channel[i].active = false;
     }
-    for (i = 0; i < This->pipeasio_number_outputs; i++) {
+    for (i = 0; i < This->pipeasio_number_outputs; i++)
+    {
         This->output_channel[i].active = false;
     }
 
@@ -1110,33 +1325,31 @@ HIDDEN LONG STDMETHODCALLTYPE CreateBuffers(LPPIPEASIO iface, BufferInformation 
         if (bufferInfoPerChannel->isInputType)
         {
             bufferInfoPerChannel->audioBufferStart = &This->input_channel[ch].audio_buffer[0];
-            bufferInfoPerChannel->audioBufferEnd = &This->input_channel[ch].audio_buffer[This->host_current_buffersize];
+            bufferInfoPerChannel->audioBufferEnd
+                    = &This->input_channel[ch].audio_buffer[This->host_current_buffersize];
             This->input_channel[ch].active = true;
             This->host_active_inputs++;
-            TRACE("  bufferInfo[%d]: IN  ch=%ld start=%p end=%p (cb_offset=%zu)\n",
-                  i, (long)ch,
-                  bufferInfoPerChannel->audioBufferStart,
-                  bufferInfoPerChannel->audioBufferEnd,
+            TRACE("  bufferInfo[%d]: IN  ch=%ld start=%p end=%p (cb_offset=%zu)\n", i, (long)ch,
+                  bufferInfoPerChannel->audioBufferStart, bufferInfoPerChannel->audioBufferEnd,
                   (size_t)((char *)bufferInfoPerChannel->audioBufferStart
                            - (char *)This->callback_audio_buffer));
         }
         else
         {
             bufferInfoPerChannel->audioBufferStart = &This->output_channel[ch].audio_buffer[0];
-            bufferInfoPerChannel->audioBufferEnd = &This->output_channel[ch].audio_buffer[This->host_current_buffersize];
+            bufferInfoPerChannel->audioBufferEnd
+                    = &This->output_channel[ch].audio_buffer[This->host_current_buffersize];
             This->output_channel[ch].active = true;
             This->host_active_outputs++;
-            TRACE("  bufferInfo[%d]: OUT ch=%ld start=%p end=%p (cb_offset=%zu)\n",
-                  i, (long)ch,
-                  bufferInfoPerChannel->audioBufferStart,
-                  bufferInfoPerChannel->audioBufferEnd,
+            TRACE("  bufferInfo[%d]: OUT ch=%ld start=%p end=%p (cb_offset=%zu)\n", i, (long)ch,
+                  bufferInfoPerChannel->audioBufferStart, bufferInfoPerChannel->audioBufferEnd,
                   (size_t)((char *)bufferInfoPerChannel->audioBufferStart
                            - (char *)This->callback_audio_buffer));
         }
     }
     TRACE("%d audio channels initialized (active_in=%d active_out=%d)\n",
-          (int)(This->host_active_inputs + This->host_active_outputs),
-          This->host_active_inputs, This->host_active_outputs);
+          (int)(This->host_active_inputs + This->host_active_outputs), This->host_active_inputs,
+          This->host_active_outputs);
 
     if (!audio_activate(This->audio_client))
         return -1000;
@@ -1146,34 +1359,57 @@ HIDDEN LONG STDMETHODCALLTYPE CreateBuffers(LPPIPEASIO iface, BufferInformation 
      * ports; our outputs write TO a sink's input ports. */
     if (This->pipeasio_connect_to_hardware)
     {
-        const char **in_src  = This->pipeasio_input_device[0]
-            ? audio_get_device_ports(This->audio_client, This->pipeasio_input_device, AUDIO_PORT_IS_OUTPUT)
-            : NULL;
-        const char **out_dst = This->pipeasio_output_device[0]
-            ? audio_get_device_ports(This->audio_client, This->pipeasio_output_device, AUDIO_PORT_IS_INPUT)
-            : NULL;
-        const char **use_in  = in_src  ? in_src  : This->phys_input_ports;
+        const char **in_src
+                = This->pipeasio_input_device[0]
+                          ? audio_get_device_ports(This->audio_client, This->pipeasio_input_device,
+                                                   AUDIO_PORT_IS_OUTPUT)
+                          : NULL;
+        const char **out_dst
+                = This->pipeasio_output_device[0]
+                          ? audio_get_device_ports(This->audio_client, This->pipeasio_output_device,
+                                                   AUDIO_PORT_IS_INPUT)
+                          : NULL;
+        const char **use_in  = in_src ? in_src : This->phys_input_ports;
         const char **use_out = out_dst ? out_dst : This->phys_output_ports;
 
         for (i = 0; use_in && use_in[i] && i < This->pipeasio_number_inputs; i++)
         {
             const char *type = audio_port_type(audio_port_by_name(This->audio_client, use_in[i]));
             if (type && strstr(type, "audio"))
-                audio_connect(This->audio_client, use_in[i], audio_port_name(This->input_channel[i].port));
+                audio_connect(This->audio_client, use_in[i],
+                              audio_port_name(This->input_channel[i].port));
         }
         for (i = 0; use_out && use_out[i] && i < This->pipeasio_number_outputs; i++)
         {
             const char *type = audio_port_type(audio_port_by_name(This->audio_client, use_out[i]));
             if (type && strstr(type, "audio"))
-                audio_connect(This->audio_client, audio_port_name(This->output_channel[i].port), use_out[i]);
+                audio_connect(This->audio_client, audio_port_name(This->output_channel[i].port),
+                              use_out[i]);
         }
 
-        if (in_src)  audio_free((void *)in_src);
-        if (out_dst) audio_free((void *)out_dst);
+        if (in_src)
+            audio_free((void *)in_src);
+        if (out_dst)
+            audio_free((void *)out_dst);
     }
 
     /* at this point all the connections are made and the process callback is outputting silence */
     This->host_driver_state = Prepared;
+
+    /* Watch config.ini for panel edits and reset on change (live reload). */
+    This->config_watch_stop = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (This->config_watch_stop)
+    {
+        This->config_watch_thread = CreateThread(NULL, 0, config_watch_proc, This, 0, NULL);
+        if (!This->config_watch_thread)
+        {
+            CloseHandle(This->config_watch_stop);
+            This->config_watch_stop = NULL;
+            WARN("config watcher: CreateThread failed, live reload disabled\n");
+        }
+    }
+    else
+        WARN("config watcher: CreateEvent failed, live reload disabled\n");
     return 0;
 }
 
@@ -1185,16 +1421,21 @@ HIDDEN LONG STDMETHODCALLTYPE CreateBuffers(LPPIPEASIO iface, BufferInformation 
  *  Implies:    Stop()
  */
 
-DEFINE_THISCALL_WRAPPER(DisposeBuffers,4)
-HIDDEN LONG STDMETHODCALLTYPE DisposeBuffers(LPPIPEASIO iface)
+DEFINE_THISCALL_WRAPPER(DisposeBuffers, 4)
+HIDDEN LONG STDMETHODCALLTYPE
+DisposeBuffers(LPPIPEASIO iface)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl*)iface;
-    int             i;
+    IPipeASIOImpl *This = (IPipeASIOImpl *)iface;
+    int            i;
 
     TRACE("iface: %p\n", iface);
 
+    /* Stop the live-config watcher before any teardown so no in-flight reset
+     * request races with Stop()/host_callbacks going away. */
+    stop_config_watch(This);
+
     if (This->host_driver_state == Running)
-        Stop (iface);
+        Stop(iface);
     if (This->host_driver_state != Prepared)
         return -1000;
 
@@ -1206,12 +1447,12 @@ HIDDEN LONG STDMETHODCALLTYPE DisposeBuffers(LPPIPEASIO iface)
     for (i = 0; i < This->pipeasio_number_inputs; i++)
     {
         This->input_channel[i].audio_buffer = NULL;
-        This->input_channel[i].active = false;
+        This->input_channel[i].active       = false;
     }
     for (i = 0; i < This->pipeasio_number_outputs; i++)
     {
         This->output_channel[i].audio_buffer = NULL;
-        This->output_channel[i].active = false;
+        This->output_channel[i].active       = false;
     }
     This->host_active_inputs = This->host_active_outputs = 0;
 
@@ -1229,8 +1470,9 @@ HIDDEN LONG STDMETHODCALLTYPE DisposeBuffers(LPPIPEASIO iface)
  *  Note:       Call sendNotification if something has changed
  */
 
-DEFINE_THISCALL_WRAPPER(ControlPanel,4)
-HIDDEN LONG STDMETHODCALLTYPE ControlPanel(LPPIPEASIO iface)
+DEFINE_THISCALL_WRAPPER(ControlPanel, 4)
+HIDDEN LONG STDMETHODCALLTYPE
+ControlPanel(LPPIPEASIO iface)
 {
     char cfg_path[1024];
     char message[1536];
@@ -1252,12 +1494,12 @@ HIDDEN LONG STDMETHODCALLTYPE ControlPanel(LPPIPEASIO iface)
              "It is a native Linux app, so it cannot run inside this Wine/Proton "
              "container.\n\n"
              "Settings are saved to:\n    %s\n\n"
-             "Changes take effect the next time the driver loads. Reselect "
-             "PipeASIO, or restart this application.",
+             "Changes are applied automatically about a second after you save, "
+             "while PipeASIO is active. If they don't appear, reselect PipeASIO "
+             "or restart this application.",
              cfg_path);
 
-    MessageBoxA(NULL, message, "PipeASIO Settings",
-                MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
+    MessageBoxA(NULL, message, "PipeASIO Settings", MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
     return 0;
 }
 
@@ -1269,77 +1511,78 @@ HIDDEN LONG STDMETHODCALLTYPE ControlPanel(LPPIPEASIO iface)
  *              0x3f4847a0 on success, do not use 0
  */
 
-DEFINE_THISCALL_WRAPPER(Future,12)
-HIDDEN LONG STDMETHODCALLTYPE Future(LPPIPEASIO iface, LONG selector, void *opt)
+DEFINE_THISCALL_WRAPPER(Future, 12)
+HIDDEN LONG STDMETHODCALLTYPE
+Future(LPPIPEASIO iface, LONG selector, void *opt)
 {
-    IPipeASIOImpl           *This = (IPipeASIOImpl *) iface;
+    IPipeASIOImpl *This = (IPipeASIOImpl *)iface;
 
     TRACE("iface: %p, selector: %d, opt: %p\n", iface, (int)selector, opt);
 
     switch (selector)
     {
-        case 1:
-            This->host_can_time_code = TRUE;
-            TRACE("The host enabled TimeCode\n");
-            return 0x3f4847a0;
-        case 2:
-            This->host_can_time_code = FALSE;
-            TRACE("The host disabled TimeCode\n");
-            return 0x3f4847a0;
-        case 3:
-            TRACE("The driver denied request to set input monitor\n");
-            return -1000;
-        case 4:
-            TRACE("The driver denied request for Transport control\n");
-            return -998;
-        case 5:
-            TRACE("The driver denied request to set input gain\n");
-            return -998;
-        case 6:
-            TRACE("The driver denied request to get input meter \n");
-            return -998;
-        case 7:
-            TRACE("The driver denied request to set output gain\n");
-            return -998;
-        case 8:
-            TRACE("The driver denied request to get output meter\n");
-            return -998;
-        case 9:
-            TRACE("The driver does not support input monitor\n");
-            return -998;
-        case 10:
-            TRACE("The driver supports TimeInfo\n");
-            return 0x3f4847a0;
-        case 11:
-            TRACE("The driver supports TimeCode\n");
-            return 0x3f4847a0;
-        case 12:
-            TRACE("The driver denied request for Transport\n");
-            return -998;
-        case 13:
-            TRACE("The driver does not support input gain\n");
-            return -998;
-        case 14:
-            TRACE("The driver does not support input meter\n");
-            return -998;
-        case 15:
-            TRACE("The driver does not support output gain\n");
-            return -998;
-        case 16:
-            TRACE("The driver does not support output meter\n");
-            return -998;
-        case 0x23111961:
-            TRACE("The driver denied request to set DSD IO format\n");
-            return -1000;
-        case 0x23111983:
-            TRACE("The driver denied request to get DSD IO format\n");
-            return -1000;
-        case 0x23112004:
-            TRACE("The driver does not support DSD IO format\n");
-            return -1000;
-        default:
-            TRACE("ASIOFuture() called with undocumented selector\n");
-            return -998;
+    case 1:
+        This->host_can_time_code = TRUE;
+        TRACE("The host enabled TimeCode\n");
+        return 0x3f4847a0;
+    case 2:
+        This->host_can_time_code = FALSE;
+        TRACE("The host disabled TimeCode\n");
+        return 0x3f4847a0;
+    case 3:
+        TRACE("The driver denied request to set input monitor\n");
+        return -1000;
+    case 4:
+        TRACE("The driver denied request for Transport control\n");
+        return -998;
+    case 5:
+        TRACE("The driver denied request to set input gain\n");
+        return -998;
+    case 6:
+        TRACE("The driver denied request to get input meter \n");
+        return -998;
+    case 7:
+        TRACE("The driver denied request to set output gain\n");
+        return -998;
+    case 8:
+        TRACE("The driver denied request to get output meter\n");
+        return -998;
+    case 9:
+        TRACE("The driver does not support input monitor\n");
+        return -998;
+    case 10:
+        TRACE("The driver supports TimeInfo\n");
+        return 0x3f4847a0;
+    case 11:
+        TRACE("The driver supports TimeCode\n");
+        return 0x3f4847a0;
+    case 12:
+        TRACE("The driver denied request for Transport\n");
+        return -998;
+    case 13:
+        TRACE("The driver does not support input gain\n");
+        return -998;
+    case 14:
+        TRACE("The driver does not support input meter\n");
+        return -998;
+    case 15:
+        TRACE("The driver does not support output gain\n");
+        return -998;
+    case 16:
+        TRACE("The driver does not support output meter\n");
+        return -998;
+    case 0x23111961:
+        TRACE("The driver denied request to set DSD IO format\n");
+        return -1000;
+    case 0x23111983:
+        TRACE("The driver denied request to get DSD IO format\n");
+        return -1000;
+    case 0x23112004:
+        TRACE("The driver does not support DSD IO format\n");
+        return -1000;
+    default:
+        TRACE("ASIOFuture() called with undocumented selector\n");
+        return -998;
     }
 }
 
@@ -1350,8 +1593,9 @@ HIDDEN LONG STDMETHODCALLTYPE Future(LPPIPEASIO iface, LONG selector, void *opt)
  *              -1000 to disable
  */
 
-DEFINE_THISCALL_WRAPPER(OutputReady,4)
-HIDDEN LONG STDMETHODCALLTYPE OutputReady(LPPIPEASIO iface)
+DEFINE_THISCALL_WRAPPER(OutputReady, 4)
+HIDDEN LONG STDMETHODCALLTYPE
+OutputReady(LPPIPEASIO iface)
 {
     /* disabled to stop stand alone NI programs from spamming the console
     TRACE("iface: %p\n", iface); */
@@ -1362,11 +1606,12 @@ HIDDEN LONG STDMETHODCALLTYPE OutputReady(LPPIPEASIO iface)
  *  ASIO process callbacks
  */
 
-static inline int buffer_size_callback(audio_nframes_t nframes, void *arg)
+static inline int
+buffer_size_callback(audio_nframes_t nframes, void *arg)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl*)arg;
+    IPipeASIOImpl *This = (IPipeASIOImpl *)arg;
 
-    if(This->host_driver_state != Running)
+    if (This->host_driver_state != Running)
         return 0;
 
     if (This->host_callbacks->sendNotification(1, 3, 0, 0))
@@ -1374,11 +1619,12 @@ static inline int buffer_size_callback(audio_nframes_t nframes, void *arg)
     return 0;
 }
 
-static inline void latency_callback(audio_latency_mode_t mode, void *arg)
+static inline void
+latency_callback(audio_latency_mode_t mode, void *arg)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl*)arg;
+    IPipeASIOImpl *This = (IPipeASIOImpl *)arg;
 
-    if(This->host_driver_state != Running)
+    if (This->host_driver_state != Running)
         return;
 
     if (This->host_callbacks->sendNotification(1, 6, 0, 0))
@@ -1387,24 +1633,24 @@ static inline void latency_callback(audio_latency_mode_t mode, void *arg)
     return;
 }
 
-static inline int process_callback(audio_nframes_t nframes, void *arg)
+static inline int
+process_callback(audio_nframes_t nframes, void *arg)
 {
-    IPipeASIOImpl               *This = (IPipeASIOImpl*)arg;
+    IPipeASIOImpl *This = (IPipeASIOImpl *)arg;
 
-    int                         i;
-    audio_transport_state_t      transport_state;
-    audio_position_t             transport_position;
-    DWORD                       time;
+    int                     i;
+    audio_transport_state_t transport_state;
+    audio_position_t        transport_position;
+    DWORD                   time;
 
     /* output silence if the host callback isn't running yet */
     if (This->host_driver_state != Running)
     {
         for (i = 0; i < This->host_active_outputs; i++)
         {
-            audio_sample_t *dst =
-                audio_port_get_buffer(This->output_channel[i].port, nframes);
+            audio_sample_t *dst = audio_port_get_buffer(This->output_channel[i].port, nframes);
             if (dst)
-                memset(dst, 0, sizeof (audio_sample_t) * nframes);
+                memset(dst, 0, sizeof(audio_sample_t) * nframes);
         }
         return 0;
     }
@@ -1415,22 +1661,26 @@ static inline int process_callback(audio_nframes_t nframes, void *arg)
     if (!diag_first_cycle_logged)
     {
         diag_first_cycle_logged = 1;
-        TRACE("first process_callback: nframes=%u host_buffer_index=%d\n",
-              (unsigned)nframes, (int)This->host_buffer_index);
+        TRACE("first process_callback: nframes=%u host_buffer_index=%d\n", (unsigned)nframes,
+              (int)This->host_buffer_index);
         for (i = 0; i < This->pipeasio_number_inputs; i++)
             if (This->input_channel[i].active)
-                TRACE("  in[%d] dst=%p .. %p (%zu bytes), audio_buffer base=%p\n",
-                      i,
-                      (void *)&This->input_channel[i].audio_buffer[nframes * This->host_buffer_index],
-                      (void *)(&This->input_channel[i].audio_buffer[nframes * This->host_buffer_index] + nframes),
+                TRACE("  in[%d] dst=%p .. %p (%zu bytes), audio_buffer base=%p\n", i,
+                      (void *)&This->input_channel[i]
+                              .audio_buffer[nframes * This->host_buffer_index],
+                      (void *)(&This->input_channel[i]
+                                        .audio_buffer[nframes * This->host_buffer_index]
+                               + nframes),
                       (size_t)nframes * sizeof(audio_sample_t),
                       (void *)This->input_channel[i].audio_buffer);
         for (i = 0; i < This->pipeasio_number_outputs; i++)
             if (This->output_channel[i].active)
-                TRACE("  out[%d] src=%p .. %p (%zu bytes), audio_buffer base=%p\n",
-                      i,
-                      (void *)&This->output_channel[i].audio_buffer[nframes * This->host_buffer_index],
-                      (void *)(&This->output_channel[i].audio_buffer[nframes * This->host_buffer_index] + nframes),
+                TRACE("  out[%d] src=%p .. %p (%zu bytes), audio_buffer base=%p\n", i,
+                      (void *)&This->output_channel[i]
+                              .audio_buffer[nframes * This->host_buffer_index],
+                      (void *)(&This->output_channel[i]
+                                        .audio_buffer[nframes * This->host_buffer_index]
+                               + nframes),
                       (size_t)nframes * sizeof(audio_sample_t),
                       (void *)This->output_channel[i].audio_buffer);
     }
@@ -1439,14 +1689,13 @@ static inline int process_callback(audio_nframes_t nframes, void *arg)
     for (i = 0; i < This->pipeasio_number_inputs; i++)
         if (This->input_channel[i].active)
         {
-            audio_sample_t *src =
-                audio_port_get_buffer(This->input_channel[i].port, nframes);
-            audio_sample_t *dst =
-                &This->input_channel[i].audio_buffer[nframes * This->host_buffer_index];
+            audio_sample_t *src = audio_port_get_buffer(This->input_channel[i].port, nframes);
+            audio_sample_t *dst
+                    = &This->input_channel[i].audio_buffer[nframes * This->host_buffer_index];
             if (src)
-                memcpy(dst, src, sizeof (audio_sample_t) * nframes);
+                memcpy(dst, src, sizeof(audio_sample_t) * nframes);
             else
-                memset(dst, 0, sizeof (audio_sample_t) * nframes);
+                memset(dst, 0, sizeof(audio_sample_t) * nframes);
         }
 
     if (This->host_num_samples.lo > ULONG_MAX - nframes)
@@ -1466,19 +1715,19 @@ static inline int process_callback(audio_nframes_t nframes, void *arg)
      * Bisected via Step 1-2 of the smash-hunt plan; ruled in by
      * gating timeGetTime alone, ruled in further by swapping in
      * GetTickCount (no smash). */
-    time = GetTickCount();
+    time                     = GetTickCount();
     This->host_time_stamp.lo = time * 1000000;
-    This->host_time_stamp.hi = ((unsigned long long) time * 1000000) >> 32;
+    This->host_time_stamp.hi = ((unsigned long long)time * 1000000) >> 32;
 
     if (This->host_time_info_mode) /* use the newer swapBuffersWithTimeInfo method if supported */
     {
-        This->host_time._2 = 1.0;  /* ASIOTime.timeInfo.speed — normal-rate playback */
+        This->host_time._2            = 1.0; /* ASIOTime.timeInfo.speed — normal-rate playback */
         This->host_time.numSamples.lo = This->host_num_samples.lo;
         This->host_time.numSamples.hi = This->host_num_samples.hi;
-        This->host_time.timeStamp.lo = This->host_time_stamp.lo;
-        This->host_time.timeStamp.hi = This->host_time_stamp.hi;
-        This->host_time.sampleRate = This->host_sample_rate;
-        This->host_time.flags = 0x7;
+        This->host_time.timeStamp.lo  = This->host_time_stamp.lo;
+        This->host_time.timeStamp.hi  = This->host_time_stamp.hi;
+        This->host_time.sampleRate    = This->host_sample_rate;
+        This->host_time.flags         = 0x7;
 
         if (This->host_can_time_code) /* FIXME addionally use time code if supported */
         {
@@ -1498,12 +1747,11 @@ static inline int process_callback(audio_nframes_t nframes, void *arg)
     for (i = 0; i < This->pipeasio_number_outputs; i++)
         if (This->output_channel[i].active)
         {
-            audio_sample_t *dst =
-                audio_port_get_buffer(This->output_channel[i].port, nframes);
+            audio_sample_t *dst = audio_port_get_buffer(This->output_channel[i].port, nframes);
             if (dst)
                 memcpy(dst,
                        &This->output_channel[i].audio_buffer[nframes * This->host_buffer_index],
-                       sizeof (audio_sample_t) * nframes);
+                       sizeof(audio_sample_t) * nframes);
         }
 
     /* switch host buffer */
@@ -1511,11 +1759,12 @@ static inline int process_callback(audio_nframes_t nframes, void *arg)
     return 0;
 }
 
-static inline int sample_rate_callback(audio_nframes_t nframes, void *arg)
+static inline int
+sample_rate_callback(audio_nframes_t nframes, void *arg)
 {
-    IPipeASIOImpl   *This = (IPipeASIOImpl*)arg;
+    IPipeASIOImpl *This = (IPipeASIOImpl *)arg;
 
-    if(This->host_driver_state != Running)
+    if (This->host_driver_state != Running)
         return 0;
 
     This->host_sample_rate = nframes;
@@ -1529,38 +1778,44 @@ static inline int sample_rate_callback(audio_nframes_t nframes, void *arg)
 
 #ifndef WINE_WITH_UNICODE
 /* Funtion required as unicode.h no longer in WINE */
-static WCHAR *strrchrW(const WCHAR* str, WCHAR ch)
+static WCHAR *
+strrchrW(const WCHAR *str, WCHAR ch)
 {
     WCHAR *ret = NULL;
-    do { if (*str == ch) ret = (WCHAR *)(ULONG_PTR)str; } while (*str++);
+    do
+    {
+        if (*str == ch)
+            ret = (WCHAR *)(ULONG_PTR)str;
+    } while (*str++);
     return ret;
 }
 #endif
 
-static VOID configure_driver(IPipeASIOImpl *This)
+static VOID
+configure_driver(IPipeASIOImpl *This)
 {
-    WCHAR   application_path[MAX_PATH];
-    WCHAR  *application_name;
-    char    environment_variable[MAX_ENVIRONMENT_SIZE];
-    char    name_env[PIPEASIO_MAX_NAME_LENGTH];
-    char    dev_env[PIPEASIO_DEVICE_NAME_MAX];
-    LONG    result;
-    DWORD   n;
+    WCHAR                  application_path[MAX_PATH];
+    WCHAR                 *application_name;
+    char                   environment_variable[MAX_ENVIRONMENT_SIZE];
+    char                   name_env[PIPEASIO_MAX_NAME_LENGTH];
+    char                   dev_env[PIPEASIO_DEVICE_NAME_MAX];
+    LONG                   result;
+    DWORD                  n;
     struct pipeasio_config cfg;
 
     /* Initialise most member variables.
      * host_num_samples, host_time, & host_time_stamp are initialized in Start()
      * num_phys_input_ports & num_phys_output_ports are initialized in Init() */
-    This->host_active_inputs = 0;
-    This->host_active_outputs = 0;
-    This->host_buffer_index = 0;
-    This->host_callbacks = NULL;
-    This->host_can_time_code = FALSE;
+    This->host_active_inputs      = 0;
+    This->host_active_outputs     = 0;
+    This->host_buffer_index       = 0;
+    This->host_callbacks          = NULL;
+    This->host_can_time_code      = FALSE;
     This->host_current_buffersize = 0;
-    This->host_driver_state = Loaded;
-    This->host_sample_rate = 0;
-    This->host_time_info_mode = FALSE;
-    This->host_version = 92;
+    This->host_driver_state       = Loaded;
+    This->host_sample_rate        = 0;
+    This->host_time_info_mode     = FALSE;
+    This->host_version            = 92;
 
     /* Load settings from the flat INI the pipeasio-settings panel writes
      * ($XDG_CONFIG_HOME/pipeasio/config.ini).  A missing file yields defaults. */
@@ -1569,25 +1824,28 @@ static VOID configure_driver(IPipeASIOImpl *This)
     bool cfg_found = pipeasio_config_load(&cfg);
     TRACE("config: %s  path=%s  buffer_size=%d inputs=%d outputs=%d fixed=%d "
           "rate=%d auto=%d out='%s' in='%s'\n",
-          cfg_found ? "loaded" : "MISSING -> defaults", cfg_path,
-          cfg.buffer_size, cfg.inputs, cfg.outputs, cfg.fixed_buffer_size,
-          cfg.sample_rate, cfg.auto_connect, cfg.output_device, cfg.input_device);
+          cfg_found ? "loaded" : "MISSING -> defaults", cfg_path, cfg.buffer_size, cfg.inputs,
+          cfg.outputs, cfg.fixed_buffer_size, cfg.sample_rate, cfg.auto_connect, cfg.output_device,
+          cfg.input_device);
     This->pipeasio_number_inputs        = cfg.inputs;
     This->pipeasio_number_outputs       = cfg.outputs;
     This->pipeasio_connect_to_hardware  = cfg.auto_connect ? TRUE : FALSE;
     This->pipeasio_fixed_buffersize     = cfg.fixed_buffer_size ? TRUE : FALSE;
+    This->pipeasio_follow_device_clock  = cfg.follow_device_clock ? TRUE : FALSE;
     This->pipeasio_preferred_buffersize = cfg.buffer_size;
     This->pipeasio_sample_rate          = cfg.sample_rate;
     lstrcpynA(This->pipeasio_output_device, cfg.output_device, sizeof This->pipeasio_output_device);
-    lstrcpynA(This->pipeasio_input_device,  cfg.input_device,  sizeof This->pipeasio_input_device);
+    lstrcpynA(This->pipeasio_input_device, cfg.input_device, sizeof This->pipeasio_input_device);
 
-    This->audio_client = NULL;
-    This->client_name[0] = 0;
-    This->phys_input_ports = NULL;
-    This->phys_output_ports = NULL;
+    This->audio_client          = NULL;
+    This->client_name[0]        = 0;
+    This->phys_input_ports      = NULL;
+    This->phys_output_ports     = NULL;
     This->callback_audio_buffer = NULL;
-    This->input_channel = NULL;
-    This->output_channel = NULL;
+    This->input_channel         = NULL;
+    This->output_channel        = NULL;
+    This->config_watch_thread   = NULL;
+    This->config_watch_stop     = NULL;
 
     /* Client (PipeWire node) name: the INI may pin one, otherwise derive it
      * from the host application's executable name. */
@@ -1599,52 +1857,66 @@ static VOID configure_driver(IPipeASIOImpl *This)
     {
         GetModuleFileNameW(0, application_path, MAX_PATH);
         application_name = strrchrW(application_path, L'.');
-        if (application_name) *application_name = 0;
+        if (application_name)
+            *application_name = 0;
         application_name = strrchrW(application_path, L'\\');
         application_name = application_name ? application_name + 1 : application_path;
-        WideCharToMultiByte(CP_ACP, WC_SEPCHARS, application_name, -1,
-                            This->client_name, PIPEASIO_MAX_NAME_LENGTH, NULL, NULL);
+        WideCharToMultiByte(CP_ACP, WC_SEPCHARS, application_name, -1, This->client_name,
+                            PIPEASIO_MAX_NAME_LENGTH, NULL, NULL);
     }
 
     /* Environment variables override INI values. */
-    if (GetEnvironmentVariableA("PIPEASIO_NUMBER_INPUTS", environment_variable, MAX_ENVIRONMENT_SIZE))
+    if (GetEnvironmentVariableA("PIPEASIO_NUMBER_INPUTS", environment_variable,
+                                MAX_ENVIRONMENT_SIZE))
     {
-        errno = 0;
+        errno  = 0;
         result = strtol(environment_variable, 0, 10);
         if (errno != ERANGE)
             This->pipeasio_number_inputs = result;
     }
-    if (GetEnvironmentVariableA("PIPEASIO_NUMBER_OUTPUTS", environment_variable, MAX_ENVIRONMENT_SIZE))
+    if (GetEnvironmentVariableA("PIPEASIO_NUMBER_OUTPUTS", environment_variable,
+                                MAX_ENVIRONMENT_SIZE))
     {
-        errno = 0;
+        errno  = 0;
         result = strtol(environment_variable, 0, 10);
         if (errno != ERANGE)
             This->pipeasio_number_outputs = result;
     }
-    if (GetEnvironmentVariableA("PIPEASIO_CONNECT_TO_HARDWARE", environment_variable, MAX_ENVIRONMENT_SIZE))
+    if (GetEnvironmentVariableA("PIPEASIO_CONNECT_TO_HARDWARE", environment_variable,
+                                MAX_ENVIRONMENT_SIZE))
     {
         if (!strcasecmp(environment_variable, "on"))
             This->pipeasio_connect_to_hardware = TRUE;
         else if (!strcasecmp(environment_variable, "off"))
             This->pipeasio_connect_to_hardware = FALSE;
     }
-    if (GetEnvironmentVariableA("PIPEASIO_FIXED_BUFFERSIZE", environment_variable, MAX_ENVIRONMENT_SIZE))
+    if (GetEnvironmentVariableA("PIPEASIO_FIXED_BUFFERSIZE", environment_variable,
+                                MAX_ENVIRONMENT_SIZE))
     {
         if (!strcasecmp(environment_variable, "on"))
             This->pipeasio_fixed_buffersize = TRUE;
         else if (!strcasecmp(environment_variable, "off"))
             This->pipeasio_fixed_buffersize = FALSE;
     }
-    if (GetEnvironmentVariableA("PIPEASIO_PREFERRED_BUFFERSIZE", environment_variable, MAX_ENVIRONMENT_SIZE))
+    if (GetEnvironmentVariableA("PIPEASIO_FOLLOW_DEVICE_CLOCK", environment_variable,
+                                MAX_ENVIRONMENT_SIZE))
     {
-        errno = 0;
+        if (!strcasecmp(environment_variable, "on"))
+            This->pipeasio_follow_device_clock = TRUE;
+        else if (!strcasecmp(environment_variable, "off"))
+            This->pipeasio_follow_device_clock = FALSE;
+    }
+    if (GetEnvironmentVariableA("PIPEASIO_PREFERRED_BUFFERSIZE", environment_variable,
+                                MAX_ENVIRONMENT_SIZE))
+    {
+        errno  = 0;
         result = strtol(environment_variable, 0, 10);
         if (errno != ERANGE)
             This->pipeasio_preferred_buffersize = result;
     }
     if (GetEnvironmentVariableA("PIPEASIO_SAMPLE_RATE", environment_variable, MAX_ENVIRONMENT_SIZE))
     {
-        errno = 0;
+        errno  = 0;
         result = strtol(environment_variable, 0, 10);
         if (errno != ERANGE)
             This->pipeasio_sample_rate = result;
@@ -1673,9 +1945,10 @@ static VOID configure_driver(IPipeASIOImpl *This)
 }
 
 /* Allocate the interface pointer and associate it with the vtbl/PipeASIO object */
-HRESULT WINAPI PipeASIOCreateInstance(REFIID riid, LPVOID *ppobj)
+HRESULT WINAPI
+PipeASIOCreateInstance(REFIID riid, LPVOID *ppobj)
 {
-    IPipeASIOImpl   *pobj;
+    IPipeASIOImpl *pobj;
 
     /* TRACE("riid: %s, ppobj: %p\n", debugstr_guid(riid), ppobj); */
 
@@ -1693,7 +1966,7 @@ HRESULT WINAPI PipeASIOCreateInstance(REFIID riid, LPVOID *ppobj)
     }
 
     pobj->lpVtbl = &PipeASIO_Vtbl;
-    pobj->ref = 1;
+    pobj->ref    = 1;
     TRACE("pobj = %p\n", pobj);
     *ppobj = pobj;
     /* TRACE("return %p\n", *ppobj); */

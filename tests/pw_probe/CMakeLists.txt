@@ -23,3 +23,13 @@ set_tests_properties(pw_delivery_probe PROPERTIES
     SKIP_RETURN_CODE 77
     TIMEOUT 30
     LABELS "integration;pipewire")
+
+add_executable(pw_default_probe pw_default_probe.c)
+target_link_libraries(pw_default_probe PRIVATE PkgConfig::PIPEWIRE pthread)
+target_compile_options(pw_default_probe PRIVATE -Wall -Wextra)
+
+add_test(NAME pw_default_probe COMMAND pw_default_probe)
+set_tests_properties(pw_default_probe PROPERTIES
+    SKIP_RETURN_CODE 77
+    TIMEOUT 30
+    LABELS "integration;pipewire")
