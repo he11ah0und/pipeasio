@@ -130,11 +130,14 @@ function(add_wine_dll)
             PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
                         GROUP_READ GROUP_EXECUTE
                         WORLD_READ WORLD_EXECUTE)
+    # $ENV{DESTDIR} keeps staged installs (DESTDIR=pkg cmake --install) from
+    # writing symlinks into the live prefix; install(CODE) does not apply
+    # DESTDIR automatically the way install(FILES) does.
     install(CODE "
         file(CREATE_LINK ${WDL_NAME}.dll
-             \${CMAKE_INSTALL_PREFIX}/lib/wine/x86_64-windows/pipeasio.dll
+             \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/lib/wine/x86_64-windows/pipeasio.dll
              SYMBOLIC)
         file(CREATE_LINK ${WDL_NAME}.dll.so
-             \${CMAKE_INSTALL_PREFIX}/lib/wine/x86_64-unix/pipeasio.dll.so
+             \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/lib/wine/x86_64-unix/pipeasio.dll.so
              SYMBOLIC)")
 endfunction()
