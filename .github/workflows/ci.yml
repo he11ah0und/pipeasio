@@ -31,8 +31,10 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:latest
     steps:
-      - name: Install toolchain
-        run: pacman -Syu --noconfirm gcc cmake ninja pkgconf git wine libpipewire pipewire qt6-base mingw-w64-gcc
+      - name: Install toolchain (with 32-bit glibc for the ABI layout assert)
+        run: |
+          printf '[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> /etc/pacman.conf
+          pacman -Syu --noconfirm gcc cmake ninja pkgconf git wine libpipewire pipewire qt6-base mingw-w64-gcc lib32-glibc
       - name: Checkout
         uses: actions/checkout@v4
       - name: Configure (BUILD_WOW64_32=ON)
