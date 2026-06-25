@@ -13,9 +13,8 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
-# libpipewire-0.3 backs src/audio.c — its headers feed the OBJECT lib
-# compile step via INCLUDES, and -lpipewire-0.3 reaches the winegcc link
-# step via LIBS.
+# PipeWire is linked through winegcc, but its headers compile into the OBJECT
+# library first.
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
 message(STATUS "Found libpipewire-0.3 ${PIPEWIRE_VERSION}")
@@ -35,16 +34,135 @@ add_wine_dll(
     LIBS      odbc32 ole32 uuid winmm user32 pipewire-0.3
 )
 
+# Optional 32-bit WoW64 front end.
+# - pipeasio32.dll: i386 PE stub, installed under lib/wine/i386-windows
+# - pipeasio32.so:  x86_64 unixlib, installed under lib/wine/x86_64-unix
+option(BUILD_WOW64_32 "Build the experimental 32-bit WoW64 PE front end + unixlib" OFF)
+if(BUILD_WOW64_32)
+    find_program(I686_W64_MINGW_GCC i686-w64-mingw32-gcc)
+    find_program(I686_W64_MINGW_RANLIB i686-w64-mingw32-ranlib)
+    set(WINE_LIB_ROOT "/usr/lib/wine" CACHE PATH
+        "Wine lib/wine directory holding the i386-windows import libraries")
+    if(NOT I686_W64_MINGW_GCC OR NOT I686_W64_MINGW_RANLIB)
+        message(FATAL_ERROR "BUILD_WOW64_32=ON requires i686-w64-mingw32-gcc and "
+                            "i686-w64-mingw32-ranlib (install mingw-w64-gcc).")
+    endif()
+    if(NOT EXISTS "${WINE_LIB_ROOT}/i386-windows/libwinecrt0.a")
+        message(FATAL_ERROR "BUILD_WOW64_32=ON: ${WINE_LIB_ROOT}/i386-windows/libwinecrt0.a "
+                            "not found; pass -DWINE_LIB_ROOT=<lib/wine>.")
+    endif()
+
+    set(PA32_DLL  "${CMAKE_BINARY_DIR}/pipeasio32.dll")
+    set(PA32_SO   "${CMAKE_BINARY_DIR}/pipeasio32.so")
+    set(PA32_DEF  "${CMAKE_SOURCE_DIR}/src/wow64/pipeasio32.def")
+    set(PA32_SPEC "${CMAKE_SOURCE_DIR}/src/wow64/pipeasio32_unixlib.spec")
+
+    # The i386 Wine import libs must be copied, made writable, and re-indexed
+    # with the i686 ranlib before the mingw linker accepts them.
+    set(_pa32_imp_names winecrt0 ntdll ole32 uuid)
+    set(_pa32_imp_libs "")
+    set(_pa32_imp_cmds "")
+    set(_pa32_imp_deps "")
+    foreach(_n ${_pa32_imp_names})
+        set(_src "${WINE_LIB_ROOT}/i386-windows/lib${_n}.a")
+        set(_dst "${CMAKE_BINARY_DIR}/lib${_n}-i386.a")
+        list(APPEND _pa32_imp_libs "${_dst}")
+        list(APPEND _pa32_imp_deps "${_src}")
+        list(APPEND _pa32_imp_cmds
+            COMMAND ${CMAKE_COMMAND} -E copy "${_src}" "${_dst}"
+            COMMAND chmod u+w "${_dst}"
+            COMMAND "${I686_W64_MINGW_RANLIB}" "${_dst}")
+    endforeach()
+    add_custom_command(
+        OUTPUT  ${_pa32_imp_libs}
+        ${_pa32_imp_cmds}
+        DEPENDS ${_pa32_imp_deps}
+        VERBATIM
+        COMMENT "index i386 Wine import libraries")
+
+    set(_pa32_inc -I "${CMAKE_SOURCE_DIR}/include" -I "${CMAKE_SOURCE_DIR}/src/wow64")
+    foreach(_d ${WINE_INCLUDE_DIRS})
+        list(APPEND _pa32_inc -I "${_d}")
+    endforeach()
+    set(_pa32_cflags -Wall -Wextra -Werror=implicit-function-declaration -msse3
+        $<$<CONFIG:Release>:-O2> $<$<CONFIG:Release>:-DNDEBUG>
+        $<$<CONFIG:RelWithDebInfo>:-O2> $<$<CONFIG:RelWithDebInfo>:-g>
+        $<$<CONFIG:RelWithDebInfo>:-DNDEBUG>
+        $<$<CONFIG:Debug>:-O0> $<$<CONFIG:Debug>:-g3> $<$<CONFIG:Debug>:-DDEBUG>
+        $<$<CONFIG:Debug>:-fno-omit-frame-pointer>)
+
+    # i386 PE front end.  The shared ASIO sources link against the WoW64
+    # proxy instead of src/audio.c.
+    add_custom_command(
+        OUTPUT  "${PA32_DLL}"
+        COMMAND "${I686_W64_MINGW_GCC}" -shared
+                "${CMAKE_SOURCE_DIR}/src/asio.c"
+                "${CMAKE_SOURCE_DIR}/src/main.c"
+                "${CMAKE_SOURCE_DIR}/src/regsvr.c"
+                "${CMAKE_SOURCE_DIR}/src/config.c"
+                "${CMAKE_SOURCE_DIR}/src/wow64/audio_proxy.c"
+                "${PA32_DEF}"
+                "${CMAKE_BINARY_DIR}/libwinecrt0-i386.a"
+                -DPIPEASIO_WOW64_PE
+                ${_pa32_inc} ${_pa32_cflags}
+                -o "${PA32_DLL}"
+                "${CMAKE_BINARY_DIR}/libntdll-i386.a"
+                "${CMAKE_BINARY_DIR}/libole32-i386.a"
+                "${CMAKE_BINARY_DIR}/libuuid-i386.a"
+        COMMAND "${WINEBUILD}" -m32 --builtin "${PA32_DLL}"
+        DEPENDS "${CMAKE_SOURCE_DIR}/src/asio.c"
+                "${CMAKE_SOURCE_DIR}/src/main.c"
+                "${CMAKE_SOURCE_DIR}/src/regsvr.c"
+                "${CMAKE_SOURCE_DIR}/src/config.c"
+                "${CMAKE_SOURCE_DIR}/src/wow64/audio_proxy.c"
+                "${PA32_DEF}" ${_pa32_imp_libs}
+        VERBATIM COMMAND_EXPAND_LISTS
+        COMMENT "mingw pipeasio32.dll (32-bit WoW64 PE front end)")
+
+    # 64-bit unixlib hosting the real PipeWire backend.
+    add_library(pipeasio32_unix_objs OBJECT
+        src/wow64/audio_unix.c src/audio.c src/config.c)
+    set_target_properties(pipeasio32_unix_objs PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(pipeasio32_unix_objs PRIVATE
+        ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src/wow64
+        ${PIPEWIRE_INCLUDE_DIRS} ${WINE_INCLUDE_DIRS})
+    target_compile_options(pipeasio32_unix_objs PRIVATE
+        -DPIPEASIO_AUDIO_UNIXLIB -D_REENTRANT
+        -Wall -fno-strict-aliasing -Werror=implicit-function-declaration
+        $<$<CONFIG:Release>:-O2> $<$<CONFIG:Release>:-DNDEBUG>
+        $<$<CONFIG:Release>:-fvisibility=hidden>
+        $<$<CONFIG:RelWithDebInfo>:-O2> $<$<CONFIG:RelWithDebInfo>:-g>
+        $<$<CONFIG:RelWithDebInfo>:-DNDEBUG> $<$<CONFIG:RelWithDebInfo>:-fvisibility=hidden>
+        $<$<CONFIG:Debug>:-O0> $<$<CONFIG:Debug>:-g3> $<$<CONFIG:Debug>:-DDEBUG>
+        $<$<CONFIG:Debug>:-fno-omit-frame-pointer>)
+    add_custom_command(
+        OUTPUT  "${PA32_SO}"
+        COMMAND "${WINEGCC}" -shared
+                "${PA32_SPEC}"
+                $<TARGET_OBJECTS:pipeasio32_unix_objs>
+                -lpthread -ldl ${PIPEWIRE_LDFLAGS}
+                -o "${PA32_SO}"
+        DEPENDS pipeasio32_unix_objs "${PA32_SPEC}"
+                $<TARGET_OBJECTS:pipeasio32_unix_objs>
+        VERBATIM COMMAND_EXPAND_LISTS
+        COMMENT "winegcc pipeasio32.so (WoW64 unixlib)")
+
+    add_custom_target(pipeasio32_unix ALL DEPENDS "${PA32_SO}")
+    add_custom_target(pipeasio32 ALL DEPENDS "${PA32_DLL}")
+    add_dependencies(pipeasio32 pipeasio32_unix)
+
+    install(FILES "${PA32_DLL}" DESTINATION lib/wine/i386-windows)
+    install(FILES "${PA32_SO}" DESTINATION lib/wine/x86_64-unix
+            PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                        GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+endif()
+
 include(GNUInstallDirs)
 
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/pipeasio-register
         DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-# Native Qt6 settings panel (pipeasio-settings), run from the user's Linux host
-# terminal.  The in-Wine ControlPanel button only shows a message pointing here,
-# since the Qt panel can't run inside the Wine/Proton container.  Optional and
-# self-contained: the core Wine driver builds fine without it.  Skips gracefully
-# if no C++ compiler or Qt6 Widgets is present.
+# Optional native Qt6 settings panel; not used inside Wine/Proton.
 option(BUILD_SETTINGS_PANEL "Build the Qt6 settings panel" ON)
 if(BUILD_SETTINGS_PANEL)
     include(CheckLanguage)
@@ -56,11 +174,11 @@ if(BUILD_SETTINGS_PANEL)
         if(Qt6_FOUND)
             add_subdirectory(gui)
         else()
-            message(WARNING "Qt6 Widgets not found — skipping the settings panel "
+            message(WARNING "Qt6 Widgets not found - skipping the settings panel "
                             "(set -DBUILD_SETTINGS_PANEL=OFF to silence).")
         endif()
     else()
-        message(WARNING "No C++ compiler — skipping the settings panel.")
+        message(WARNING "No C++ compiler - skipping the settings panel.")
     endif()
 endif()
 
@@ -72,6 +190,7 @@ if(BUILD_TESTS)
     add_subdirectory(tests/asio_loopback)
     add_subdirectory(tests/unit)
     add_subdirectory(tests/pw_probe)
+    add_subdirectory(tests/wow64)
     if(BUILD_SETTINGS_PANEL AND Qt6_FOUND)
         add_subdirectory(tests/gui)
     endif()

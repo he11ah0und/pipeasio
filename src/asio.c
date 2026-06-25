@@ -30,47 +30,21 @@
 #include <stdio.h>
 #include <errno.h>
 #include <limits.h>
+#ifndef PIPEASIO_WOW64_PE
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <pthread.h>
+#endif
 #include <stdatomic.h>
 
 #include <stdlib.h> /* getenv for PIPEASIO_DEBUG */
 
-/* Include wine/debug.h for helpers like debugstr_guid, then override
- * TRACE/WARN/ERR to raw write(STDERR_FILENO,…): bypasses Wine's WINEDEBUG
- * gating and the stdio buffers discarded on abnormal exit.  Verbose TRACE
- * is opt-in via the PIPEASIO_DEBUG env var; WARN/ERR always emit. */
+/* wine/debug.h provides debugstr_guid; pipeasio_log.h overrides TRACE/WARN/ERR. */
+#ifndef PIPEASIO_WOW64_PE
 #include "wine/debug.h"
-#undef TRACE
-#undef WARN
-#undef ERR
-static inline int
-pipeasio_log_on(void)
-{
-    static int on = -1;
-    if (on < 0)
-        on = getenv("PIPEASIO_DEBUG") ? 1 : 0;
-    return on;
-}
-#define PIPEASIO_LOG(pfx, fmt, ...)                                                                \
-    do                                                                                             \
-    {                                                                                              \
-        char _buf[1024];                                                                           \
-        int  _n = snprintf(_buf, sizeof _buf, pfx fmt, ##__VA_ARGS__);                             \
-        if (_n > 0)                                                                                \
-            (void)write(STDERR_FILENO, _buf,                                                       \
-                        (size_t)_n < sizeof _buf ? (size_t)_n : sizeof _buf - 1);                  \
-    } while (0)
-#define TRACE(fmt, ...)                                                                            \
-    do                                                                                             \
-    {                                                                                              \
-        if (pipeasio_log_on())                                                                     \
-            PIPEASIO_LOG("[pipeasio] ", fmt, ##__VA_ARGS__);                                       \
-    } while (0)
-#define WARN(fmt, ...) PIPEASIO_LOG("[pipeasio] WARN: ", fmt, ##__VA_ARGS__)
-#define ERR(fmt, ...) PIPEASIO_LOG("[pipeasio] ERR: ", fmt, ##__VA_ARGS__)
+#endif
+#include "pipeasio_log.h"
 
 #include <objbase.h>
 #include <mmsystem.h>
@@ -83,8 +57,27 @@ pipeasio_log_on(void)
 #include "audio.h"
 #include "pipeasio_offsets.h"
 #include "pipeasio_config.h"
+#include "pipeasio_rt.h"
+#ifdef PIPEASIO_WOW64_PE
+#include "pipeasio_wow64_pe.h"
+#endif
 
-#ifdef DEBUG
+#ifdef PIPEASIO_WOW64_PE
+/* MinGW build: enough GUID formatting for TRACE diagnostics. */
+static inline const char *
+wine_dbgstr_guid(const GUID *id)
+{
+    static char buf[48];
+    if (!id)
+        return "(null)";
+    snprintf(buf, sizeof buf, "{%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
+             (unsigned long)id->Data1, id->Data2, id->Data3, id->Data4[0], id->Data4[1],
+             id->Data4[2], id->Data4[3], id->Data4[4], id->Data4[5], id->Data4[6], id->Data4[7]);
+    return buf;
+}
+#endif
+
+#if defined(DEBUG) && !defined(PIPEASIO_WOW64_PE)
 WINE_DEFAULT_DEBUG_CHANNEL(asio);
 #endif
 
@@ -94,13 +87,15 @@ WINE_DEFAULT_DEBUG_CHANNEL(asio);
 #define PIPEASIO_MAXIMUM_BUFFERSIZE 8192
 #define PIPEASIO_PREFERRED_BUFFERSIZE 1024
 
-/* ASIO drivers (breaking the COM specification) use the Microsoft variety of
- * thiscall calling convention which gcc is unable to produce.  These macros
- * add an extra layer to fixup the registers. Borrowed from config.h and the
- * wine source code.
- */
-
-/* From config.h */
+/* i386 ASIO uses MS thiscall; GCC needs a trampoline. */
+#if defined(PIPEASIO_WOW64_PE) /* i386 PE / COFF (MinGW) */
+#define __ASM_DEFINE_FUNC(name, suffix, code)                                                      \
+    asm(".text\n\t.align 4\n\t.globl _" #name suffix "\n_" #name suffix                            \
+        ":\n\t.cfi_startproc\n\t" code "\n\t.cfi_endproc");
+#define __ASM_GLOBAL_FUNC(name, code) __ASM_DEFINE_FUNC(name, "", code)
+#define __ASM_NAME(name) "_" name
+#define __ASM_STDCALL(args) "@" #args
+#else /* ELF (winegcc) */
 #define __ASM_DEFINE_FUNC(name, suffix, code)                                                      \
     asm(".text\n\t.align 4\n\t.globl " #name suffix "\n\t.type " #name suffix                      \
         ",@function\n" #name suffix ":\n\t.cfi_startproc\n\t" code                                 \
@@ -108,9 +103,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(asio);
 #define __ASM_GLOBAL_FUNC(name, code) __ASM_DEFINE_FUNC(name, "", code)
 #define __ASM_NAME(name) name
 #define __ASM_STDCALL(args) ""
+#endif
 
-/* From wine source */
-#ifdef __i386__ /* thiscall functions are i386-specific */
+#ifdef __i386__ /* i386 PE/ELF */
 
 #define THISCALL(func) __thiscall_##func
 #define THISCALL_NAME(func) __ASM_NAME("__thiscall_" #func)
@@ -121,6 +116,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(asio);
                                          "pushl %ecx\n\t"                                          \
                                          "pushl %eax\n\t"                                          \
                                          "jmp " __ASM_NAME(#func) __ASM_STDCALL(args))
+
 #else /* __i386__ */
 
 #define THISCALL(func) func
@@ -130,7 +126,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(asio);
 
 #endif /* __i386__ */
 
-/* Hide ELF symbols for the COM members - No need to to export them */
+/* Hide ELF symbols for COM members. */
 #define HIDDEN __attribute__((visibility("hidden")))
 
 #ifdef _WIN64
@@ -422,39 +418,25 @@ AddRef(LPPIPEASIO iface)
     return ref;
 }
 
-/* Process-durable hint for follow-device mode: the last device-dictated quantum
- * the watcher observed.  Init seeds host_current_buffersize from it so the
- * buffer-size negotiation converges to the device quantum in one settle cycle
- * instead of re-guessing (and resetting) forever across host re-inits.  One
- * ASIO driver instance per host process, so a single global suffices. */
+/* Follow-device quantum remembered across driver re-inits. */
 static _Atomic LONG g_follower_quantum;
 
-/*
- * Live settings-reload watcher.
- *
- * The driver reads config.ini once, in configure_driver() at Init.  To make the
- * Qt settings panel's edits apply to an already-running driver, this background
- * thread polls the INI once a second; when the file changes on disk it asks the
- * host to reset (the same kAsioResetRequest path buffer_size_callback uses), so
- * the host tears down and re-Inits, re-reading the INI.
- *
- * It is created with CreateThread (not pthread) so it owns a Wine TEB before it
- * calls into host code via sendNotification — the same requirement that forces
- * audio.c's RT thread through CreateThread.  Its lifetime is bracketed by
- * CreateBuffers (start) and DisposeBuffers (stop+join, before host_callbacks is
- * cleared), so the host_callbacks dereference can never use-after-free.
- */
+/* Poll config.ini and request host reset when it changes. */
 static DWORD WINAPI
 config_watch_proc(LPVOID arg)
 {
     IPipeASIOImpl *This = (IPipeASIOImpl *)arg;
     char           path[1024];
-    struct stat    st;
-    time_t         last_sec           = 0;
-    long           last_nsec          = 0;
-    off_t          last_size          = 0;
-    ino_t          last_ino           = 0;
-    LONG           last_reset_quantum = 0;
+#ifndef PIPEASIO_WOW64_PE
+    struct stat st;
+    time_t      last_sec  = 0;
+    long        last_nsec = 0;
+    off_t       last_size = 0;
+    ino_t       last_ino  = 0;
+#else
+    uint64_t last_fp = 0;
+#endif
+    LONG last_reset_quantum = 0;
 
     if (!pipeasio_config_path(path, sizeof path))
     {
@@ -463,6 +445,7 @@ config_watch_proc(LPVOID arg)
     }
     TRACE("config watcher: watching %s\n", path);
 
+#ifndef PIPEASIO_WOW64_PE
     if (stat(path, &st) == 0)
     {
         last_sec  = st.st_mtim.tv_sec;
@@ -470,6 +453,9 @@ config_watch_proc(LPVOID arg)
         last_size = st.st_size;
         last_ino  = st.st_ino;
     }
+#else
+    last_fp = pipeasio_wow64_config_fingerprint();
+#endif
 
     for (;;)
     {
@@ -480,6 +466,7 @@ config_watch_proc(LPVOID arg)
         bool reset = false;
 
         /* config.ini edited in the panel */
+#ifndef PIPEASIO_WOW64_PE
         if (stat(path, &st) == 0
             && (st.st_mtim.tv_sec != last_sec || st.st_mtim.tv_nsec != last_nsec
                 || st.st_size != last_size || st.st_ino != last_ino))
@@ -491,6 +478,17 @@ config_watch_proc(LPVOID arg)
             TRACE("config watcher: %s changed\n", path);
             reset = true;
         }
+#else
+        {
+            uint64_t fp = pipeasio_wow64_config_fingerprint();
+            if (fp && fp != last_fp)
+            {
+                last_fp = fp;
+                TRACE("config watcher: %s changed\n", path);
+                reset = true;
+            }
+        }
+#endif
 
         /* PipeWire default device switched while we are following it */
         if (This->host_driver_state == Running
@@ -501,12 +499,7 @@ config_watch_proc(LPVOID arg)
             reset = true;
         }
 
-        /* Follow-device mode: settle the host's buffer size to the device's
-         * actual quantum.  audio_on_process records the live quantum; when it
-         * differs from what the host negotiated, remember it durably and ask
-         * for a reset so the host re-queries GetBufferSize.  last_reset_quantum
-         * fires the reset once per distinct value (no loop if the host
-         * ignores the request). */
+        /* Follow-device mode: reset once per newly observed graph quantum. */
         if (This->pipeasio_follow_device_clock && This->host_driver_state == Running)
         {
             LONG q = (LONG)audio_observed_quantum(This->audio_client);
@@ -611,17 +604,9 @@ Init(LPPIPEASIO iface, void *sysRef)
     int            i;
 
     This->sys_ref = sysRef;
-    /* Do NOT mlockall(MCL_FUTURE) here.  Under Wine it forces every
-     * subsequent mmap to lock its pages under RLIMIT_MEMLOCK; win32u
-     * maps a fresh "session" shared-memory block per batch of USER
-     * objects, so when the host (FL Studio) registers many plugin
-     * window classes during project load, that mmap hits the memlock
-     * limit and NtUserRegisterClassExWOW fails with "Failed to get
-     * shared session object" — recursing until the GUI thread's 1 MB
-     * stack overflows and the host crashes.  The lock is process-global
-     * and never reversed, so it persists even after the host switches
-     * back to another ASIO driver (only a fresh process recovers).
-     * pwasio locks nothing; PipeWire's rt module owns RT paging. */
+    /* Do not call mlockall(MCL_FUTURE).  Wine's win32u maps USER shared memory
+     * after driver init; locking those pages can exhaust RLIMIT_MEMLOCK and
+     * crash plugin-heavy hosts.  PipeWire's RT module owns paging. */
     configure_driver(This);
 
     if (!(This->audio_client = audio_open(This->client_name, audio_options, &audio_status)))
@@ -635,23 +620,17 @@ Init(LPPIPEASIO iface, void *sysRef)
     audio_set_follow_device(This->audio_client, This->pipeasio_follow_device_clock);
 
     This->host_sample_rate = audio_get_sample_rate(This->audio_client);
-    /* Seed the reported buffer size from the user's configured preferred size.
-     * PipeWire has no fixed server buffer — the host's chosen size drives the
-     * quantum via CreateBuffers — so the fixed-size path must report the
-     * configured value, not the backend default. */
+    /* Before CreateBuffers, report the configured preferred size. */
     This->host_current_buffersize = This->pipeasio_preferred_buffersize;
     if (This->pipeasio_follow_device_clock)
     {
-        /* Follower mode: prefer the device quantum observed on a previous run
-         * (set by config_watch_proc); the configured size is only the first
-         * guess until the watcher settles it. */
+        /* First guess until the watcher observes the device quantum. */
         LONG hint = atomic_load(&g_follower_quantum);
         if (hint)
             This->host_current_buffersize = hint;
     }
 
-    /* Allocate IOChannel structures (zeroed — audio_buffer and active
-     * must start NULL/false before CreateBuffers wires them up). */
+    /* Zeroed: CreateBuffers initializes audio_buffer and active. */
     This->input_channel = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
                                     (This->pipeasio_number_inputs + This->pipeasio_number_outputs)
                                             * sizeof(IOChannel));
@@ -796,27 +775,10 @@ Start(LPPIPEASIO iface)
     This->host_buffer_index   = 0;
     This->host_num_samples.hi = This->host_num_samples.lo = 0;
 
-    /* systemTime from the PipeWire graph clock — monotonic and audio-domain.
-     * 0 here until the first process cycle runs; fine for the one-shot prime. */
-    uint64_t ns              = audio_get_time_nsec(This->audio_client);
-    This->host_time_stamp.lo = (ULONG)(ns & 0xFFFFFFFFu);
-    This->host_time_stamp.hi = (ULONG)(ns >> 32);
-
-    if (This->host_time_info_mode) /* use the newer swapBuffersWithTimeInfo method if supported */
-    {
-        This->host_time._2            = 1.0; /* ASIOTime.timeInfo.speed — normal-rate playback */
-        This->host_time.numSamples.lo = This->host_time.numSamples.hi = 0;
-        This->host_time.timeStamp.lo                                  = This->host_time_stamp.lo;
-        This->host_time.timeStamp.hi                                  = This->host_time_stamp.hi;
-        This->host_time.sampleRate                                    = This->host_sample_rate;
-        This->host_time.flags                                         = 0x7;
-
-        This->host_callbacks->swapBuffersWithTimeInfo(&This->host_time, This->host_buffer_index, 1);
-    }
-    else
-    { /* use the old swapBuffers method */
-        This->host_callbacks->swapBuffers(This->host_buffer_index, 1);
-    }
+    /* systemTime from the PipeWire graph clock - 0 until the first process
+     * cycle runs, which is fine for the one-shot prime. */
+    pipeasio_host_buffer_switch(This, This->host_buffer_index, 0,
+                                audio_get_time_nsec(This->audio_client));
 
     This->host_buffer_index = This->host_buffer_index ? 0 : 1;
 
@@ -1081,7 +1043,7 @@ CreateBuffers(LPPIPEASIO iface, BufferInformation *bufferInfo, LONG numChannels,
         return -997;
 
     /* Check for invalid channel numbers.  Both the count-per-direction
-     * AND each entry's channelNumber must be in range — without the
+     * AND each entry's channelNumber must be in range - without the
      * latter, a host that passes channelNumber=99 walks straight off
      * input_channel[]/output_channel[] into adjacent heap. */
     for (i = j = k = 0; i < numChannels; i++, bufferInfoPerChannel++)
@@ -1125,7 +1087,7 @@ CreateBuffers(LPPIPEASIO iface, BufferInformation *bufferInfo, LONG numChannels,
             return -997;
         /* Sync the backend buffer size so audio_activate forces the matching
          * PipeWire quantum.  Without this the graph keeps its default quantum
-         * while the host fills only bufferSize frames per cycle — the daemon
+         * while the host fills only bufferSize frames per cycle - the daemon
          * then plays buffer-worth of real audio stretched across a larger
          * quantum, i.e. slow, pitched-down output. */
         if (!audio_set_buffer_size(This->audio_client, bufferSize))
@@ -1146,13 +1108,7 @@ CreateBuffers(LPPIPEASIO iface, BufferInformation *bufferInfo, LONG numChannels,
         }
         else
         {
-            /* Always push the negotiated size to the backend before
-             * audio_activate forces the PipeWire quantum.  host_current_
-             * buffersize is seeded to the preferred size at Init while the
-             * backend defaults to AUDIO_DEFAULT_BUFFER_SIZE, so an equal
-             * asio-side cache does NOT imply an equal backend quantum:
-             * skipping the sync left the graph at 1024 while the host filled
-             * `bufferSize` frames per cycle — slow, pitched-down output. */
+            /* Always push the host size to the backend before audio_activate. */
             This->host_current_buffersize = bufferSize;
             if (!audio_set_buffer_size(This->audio_client, bufferSize))
             {
@@ -1239,6 +1195,22 @@ CreateBuffers(LPPIPEASIO iface, BufferInformation *bufferInfo, LONG numChannels,
     TRACE("%d audio channels initialized (active_in=%d active_out=%d)\n",
           (int)(This->host_active_inputs + This->host_active_outputs), This->host_active_inputs,
           This->host_active_outputs);
+
+#ifdef PIPEASIO_WOW64_PE
+    /* Hand the shared callback buffer + channel activity to the unix RT loop;
+     * the gather/scatter runs unix-side (see src/wow64/audio_unix.c). */
+    {
+        bool in_active[PIPEASIO_MAX_CHANNELS];
+        bool out_active[PIPEASIO_MAX_CHANNELS];
+        for (i = 0; i < This->pipeasio_number_inputs; i++)
+            in_active[i] = This->input_channel[i].active;
+        for (i = 0; i < This->pipeasio_number_outputs; i++)
+            out_active[i] = This->output_channel[i].active;
+        pipeasio_wow64_bind_rt(This->audio_client, This->callback_audio_buffer,
+                               This->host_current_buffersize, This->pipeasio_number_inputs,
+                               This->pipeasio_number_outputs, in_active, out_active);
+    }
+#endif
 
     if (!audio_activate(This->audio_client))
     {
@@ -1510,6 +1482,45 @@ latency_callback(audio_latency_mode_t mode, void *arg)
     return;
 }
 
+/* Host-callback bridge. */
+
+void
+pipeasio_host_buffer_switch(void *This, int32_t buffer_index, audio_nframes_t add_samples,
+                            uint64_t time_nsec)
+{
+    IPipeASIOImpl *impl = (IPipeASIOImpl *)This;
+
+    if (impl->host_num_samples.lo > ULONG_MAX - add_samples)
+        impl->host_num_samples.hi++;
+    impl->host_num_samples.lo += add_samples;
+
+    impl->host_time_stamp.lo = (ULONG)(time_nsec & 0xFFFFFFFFu);
+    impl->host_time_stamp.hi = (ULONG)(time_nsec >> 32);
+
+    if (impl->host_time_info_mode)
+    {
+        impl->host_time._2            = 1.0;
+        impl->host_time.numSamples.lo = impl->host_num_samples.lo;
+        impl->host_time.numSamples.hi = impl->host_num_samples.hi;
+        impl->host_time.timeStamp.lo  = impl->host_time_stamp.lo;
+        impl->host_time.timeStamp.hi  = impl->host_time_stamp.hi;
+        impl->host_time.sampleRate    = impl->host_sample_rate;
+        impl->host_time.flags         = 0x7;
+
+        impl->host_callbacks->swapBuffersWithTimeInfo(&impl->host_time, buffer_index, 1);
+    }
+    else
+    {
+        impl->host_callbacks->swapBuffers(buffer_index, 1);
+    }
+}
+
+int
+pipeasio_host_is_running(void *This)
+{
+    return ((IPipeASIOImpl *)This)->host_driver_state == Running;
+}
+
 static inline int
 process_callback(audio_nframes_t nframes, void *arg)
 {
@@ -1529,36 +1540,6 @@ process_callback(audio_nframes_t nframes, void *arg)
         return 0;
     }
 
-    /* One-shot dump of the actual memcpy bounds we're about to use,
-     * so we can audit FL Studio's idea of the buffer layout vs. ours. */
-    static int diag_first_cycle_logged;
-    if (!diag_first_cycle_logged)
-    {
-        diag_first_cycle_logged = 1;
-        TRACE("first process_callback: nframes=%u host_buffer_index=%d\n", (unsigned)nframes,
-              (int)This->host_buffer_index);
-        for (i = 0; i < This->pipeasio_number_inputs; i++)
-            if (This->input_channel[i].active)
-                TRACE("  in[%d] dst=%p .. %p (%zu bytes), audio_buffer base=%p\n", i,
-                      (void *)&This->input_channel[i]
-                              .audio_buffer[nframes * This->host_buffer_index],
-                      (void *)(&This->input_channel[i]
-                                        .audio_buffer[nframes * This->host_buffer_index]
-                               + nframes),
-                      (size_t)nframes * sizeof(audio_sample_t),
-                      (void *)This->input_channel[i].audio_buffer);
-        for (i = 0; i < This->pipeasio_number_outputs; i++)
-            if (This->output_channel[i].active)
-                TRACE("  out[%d] src=%p .. %p (%zu bytes), audio_buffer base=%p\n", i,
-                      (void *)&This->output_channel[i]
-                              .audio_buffer[nframes * This->host_buffer_index],
-                      (void *)(&This->output_channel[i]
-                                        .audio_buffer[nframes * This->host_buffer_index]
-                               + nframes),
-                      (size_t)nframes * sizeof(audio_sample_t),
-                      (void *)This->output_channel[i].audio_buffer);
-    }
-
     /* copy device input to host buffers */
     for (i = 0; i < This->pipeasio_number_inputs; i++)
         if (This->input_channel[i].active)
@@ -1572,32 +1553,8 @@ process_callback(audio_nframes_t nframes, void *arg)
                 memset(dst, 0, sizeof(audio_sample_t) * nframes);
         }
 
-    if (This->host_num_samples.lo > ULONG_MAX - nframes)
-        This->host_num_samples.hi++;
-    This->host_num_samples.lo += nframes;
-
-    /* systemTime from the PipeWire graph clock captured this cycle — a monotonic,
-     * audio-domain nanosecond clock (also avoids a per-cycle Wine call). */
-    uint64_t ns              = audio_get_time_nsec(This->audio_client);
-    This->host_time_stamp.lo = (ULONG)(ns & 0xFFFFFFFFu);
-    This->host_time_stamp.hi = (ULONG)(ns >> 32);
-
-    if (This->host_time_info_mode) /* use the newer swapBuffersWithTimeInfo method if supported */
-    {
-        This->host_time._2            = 1.0; /* ASIOTime.timeInfo.speed — normal-rate playback */
-        This->host_time.numSamples.lo = This->host_num_samples.lo;
-        This->host_time.numSamples.hi = This->host_num_samples.hi;
-        This->host_time.timeStamp.lo  = This->host_time_stamp.lo;
-        This->host_time.timeStamp.hi  = This->host_time_stamp.hi;
-        This->host_time.sampleRate    = This->host_sample_rate;
-        This->host_time.flags         = 0x7;
-
-        This->host_callbacks->swapBuffersWithTimeInfo(&This->host_time, This->host_buffer_index, 1);
-    }
-    else
-    { /* use the old swapBuffers method */
-        This->host_callbacks->swapBuffers(This->host_buffer_index, 1);
-    }
+    pipeasio_host_buffer_switch(This, This->host_buffer_index, nframes,
+                                audio_get_time_nsec(This->audio_client));
 
     /* copy host to device output buffers */
     for (i = 0; i < This->pipeasio_number_outputs; i++)
@@ -1675,7 +1632,11 @@ configure_driver(IPipeASIOImpl *This)
      * ($XDG_CONFIG_HOME/pipeasio/config.ini).  A missing file yields defaults. */
     char cfg_path[1024] = "";
     pipeasio_config_path(cfg_path, sizeof cfg_path);
+#ifdef PIPEASIO_WOW64_PE
+    bool cfg_found = pipeasio_wow64_load_config(&cfg);
+#else
     bool cfg_found = pipeasio_config_load(&cfg);
+#endif
     TRACE("config: %s  path=%s  buffer_size=%d inputs=%d outputs=%d fixed=%d "
           "rate=%d auto=%d out='%s' in='%s'\n",
           cfg_found ? "loaded" : "MISSING -> defaults", cfg_path, cfg.buffer_size, cfg.inputs,
@@ -1812,12 +1773,7 @@ PipeASIOCreateInstance(REFIID riid, LPVOID *ppobj)
 {
     IPipeASIOImpl *pobj;
 
-    /* HEAP_ZERO_MEMORY (0x8) is critical: the struct holds host-facing
-     * state like host_time.speed (a double the ASIO host may read even
-     * when we don't flag it kSpeedValid).  Allocating with random bytes
-     * makes the host see uninitialized doubles — NaN/Inf — and apply
-     * them as gain/rate multipliers, which sounds like noise and can
-     * trip downstream FPU exceptions deep inside the host's engine. */
+    /* Host-facing doubles must start at zero, not indeterminate bytes. */
     pobj = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*pobj));
     if (pobj == NULL)
     {

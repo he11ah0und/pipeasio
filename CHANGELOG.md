@@ -4,6 +4,24 @@ All notable changes to PipeASIO are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Experimental opt-in 32-bit (WoW64) front end for 32-bit Windows ASIO hosts,
+  built with `-DBUILD_WOW64_32=ON` (default OFF) and a MinGW cross-compiler. A
+  thin i386 PE thunk (`pipeasio32.dll`) forwards every ASIO call over
+  `__wine_unix_call` to the same 64-bit PipeWire backend (`pipeasio32.so`), so no
+  32-bit libpipewire or 32-bit Linux userspace is needed. `pipeasio-register`
+  registers the CLSID under the 32-bit view when the DLL is present. The 64-bit
+  driver is byte-for-byte unaffected. Validated end-to-end by a new `asio_probe32`
+  host, with the WoW64 unix-call ABI layout locked by a compile-time test.
+
+- The WoW64 DSP pump thread runs at `SCHED_FIFO` priority 80 (matching the native
+  driver's RT ceiling) with FTZ/DAZ denormal flushing and an 8 MB stack, and its
+  per-cycle reply deadline uses `CLOCK_MONOTONIC`, so the 32-bit path sustains
+  64-128 frame buffers without xruns.
+
 ## [1.0.0] - 2026-06-10
 
 ### Added
@@ -17,7 +35,7 @@ follow [Semantic Versioning](https://semver.org/).
   counter through the driver and a PipeWire null-sink loopback and fails on
   any non-bit-exact sample, dropped or duplicated buffer, swapped channel, or
   measured round-trip latency disagreeing with `GetLatencies()`; `SWEEP=1`
-  covers buffer sizes 128–1024 at 44.1/48/96 kHz with in-process buffer
+  covers buffer sizes 128-1024 at 44.1/48/96 kHz with in-process buffer
   re-negotiation.
 
 ### Changed
@@ -33,7 +51,7 @@ follow [Semantic Versioning](https://semver.org/).
 
 - Fake ASIO timecode support. The driver no longer answers `kAsioCanTimeCode`
   / `kAsioEnableTimeCodeRead` affirmatively or fills `ASIOTime.timeCode` with
-  fabricated values — PipeWire has no transport timeline to source timecode
+  fabricated values - PipeWire has no transport timeline to source timecode
   from. Hosts fall back to sample-position sync, which is accurate.
 
 ### Fixed

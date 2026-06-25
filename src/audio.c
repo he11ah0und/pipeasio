@@ -1,11 +1,5 @@
 /*
- * audio.c — native libpipewire-0.3 backend for PipeASIO.
- *
- * Stands up a pw_thread_loop and context, and overrides spa_thread_utils
- * on the data loop so PipeWire's RT thread is a Win32 CreateThread'd Wine
- * thread (proper TEB, able to call back into the ASIO host's COM methods).
- * Creates a duplex pw_filter with MAP_BUFFERS ports and walks the registry
- * for port discovery and audio_connect.
+ * Native libpipewire-0.3 backend for PipeASIO.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * Copyright (C) 2026 PipeASIO contributors
@@ -29,18 +23,16 @@
 #include "audio.h"
 #include "pipeasio_offsets.h"
 
+#ifndef PIPEASIO_AUDIO_UNIXLIB
 #define WIN32_LEAN_AND_MEAN
 #include "windef.h"
 #include "winbase.h"
+#endif
 #include "wine/debug.h"
 
 #include <stdlib.h> /* getenv for PIPEASIO_DEBUG */
 
-/* Raw write(STDERR_FILENO,…) logging: bypasses Wine's debug-channel
- * filtering and the stdio buffers discarded on abnormal exit, and works
- * from any thread (incl. the RT/data-loop threads that have no Wine
- * TEB).  Verbose TRACE is opt-in via the PIPEASIO_DEBUG env var;
- * WARN/ERR always emit. */
+/* Raw stderr logging; TRACE is gated by PIPEASIO_DEBUG. */
 #undef TRACE
 #undef WARN
 #undef ERR
@@ -70,8 +62,7 @@ pipeasio_log_on(void)
 #define WARN(fmt, ...) PIPEASIO_LOG("[pipeasio] WARN: ", fmt, ##__VA_ARGS__)
 #define ERR(fmt, ...) PIPEASIO_LOG("[pipeasio] ERR: ", fmt, ##__VA_ARGS__)
 
-/* Build identifier — stamped into the audio_open banner so we can verify
- * which build is actually loaded (no more staring at stale logs). */
+/* Printed by audio_open to identify the loaded binary. */
 #define PIPEASIO_BUILD_TAG __DATE__ " " __TIME__
 
 #include <pipewire/pipewire.h>
@@ -96,9 +87,18 @@ pipeasio_log_on(void)
 
 WINE_DEFAULT_DEBUG_CHANNEL(asio);
 
-/* Startup defaults.  The buffer size is overridden by the ASIO host's
- * negotiated size in CreateBuffers; the sample rate is overridden by
- * audio_on_io_changed when the graph runs at a different rate. */
+/* RT/data-loop thread id for diagnostics. */
+static unsigned long
+audio_current_thread_id(void)
+{
+#ifdef PIPEASIO_AUDIO_UNIXLIB
+    return (unsigned long)(uintptr_t)pthread_self();
+#else
+    return (unsigned long)GetCurrentThreadId();
+#endif
+}
+
+/* Defaults before host negotiation and graph callbacks. */
 #define AUDIO_DEFAULT_SAMPLE_RATE 48000u
 #define AUDIO_DEFAULT_BUFFER_SIZE 1024u
 
@@ -106,12 +106,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(asio);
 #define AUDIO_RT_PRIO_MIN 1
 #define AUDIO_RT_PRIO_MAX 80
 
-/* ----------------------------------------------------------------------
- * Wine RT thread bridge — install custom spa_thread_utils on the data
- * loop so the audio thread is a CreateThread'd Wine thread, capable of
- * calling back into the ASIO host's COM methods.  PipeWire's pw_data_loop
- * spawns exactly one RT thread, so a single state slot is sufficient.
- * ---------------------------------------------------------------------- */
+#ifndef PIPEASIO_AUDIO_UNIXLIB
+/* Wine RT thread bridge for the PipeWire data loop. */
 
 struct audio_rt_state
 {
@@ -155,13 +151,7 @@ audio_rt_create(void *data, const struct spa_dict *props, void *(*entry)(void *)
     s->user_arg   = arg;
     atomic_store_explicit(&s->ready, false, memory_order_relaxed);
 
-    /* 8MB stack for the pw_filter → audio_on_process → ASIO host callback
-     * chain; the Win32 1MB default is too small.
-     *
-     * STACK_SIZE_PARAM_IS_A_RESERVATION (0x00010000) — without this flag
-     * dwStackSize sets only the *committed* size; the *reserved* size
-     * still comes from the PE header (1MB default). With the flag, the
-     * full 8MB is reserved, which is what we actually want here. */
+    /* The ASIO host callback chain can exceed Wine's 1 MB default stack. */
     s->win_handle = CreateThread(NULL, 8 * 1024 * 1024, audio_rt_trampoline, s,
                                  STACK_SIZE_PARAM_IS_A_RESERVATION, &s->win_tid);
     if (!s->win_handle)
@@ -248,10 +238,9 @@ static const struct spa_thread_utils_methods audio_rt_methods = {
     SPA_VERSION_THREAD_UTILS_METHODS,   .create = audio_rt_create,      .join = audio_rt_join,
     .get_rt_range = audio_rt_get_range, .acquire_rt = audio_rt_acquire, .drop_rt = audio_rt_drop,
 };
+#endif /* !PIPEASIO_AUDIO_UNIXLIB */
 
-/* ----------------------------------------------------------------------
- * Opaque types backing audio.h
- * ---------------------------------------------------------------------- */
+/* Opaque types backing audio.h. */
 
 struct audio_client
 {
@@ -267,8 +256,10 @@ struct audio_client
     struct pw_core        *core;
     struct pw_data_loop   *data_loop;
 
+#ifndef PIPEASIO_AUDIO_UNIXLIB
     struct audio_rt_state   rt;
     struct spa_thread_utils rt_iface;
+#endif
 
     audio_process_cb     process_cb;
     void                *process_cb_arg;
@@ -281,7 +272,7 @@ struct audio_client
 
     bool active;
 
-    /* --- pw_filter ------------------------------------------------ */
+    /* pw_filter */
 
     struct pw_filter *filter;
     struct spa_hook   filter_listener;
@@ -292,10 +283,10 @@ struct audio_client
     uint32_t       n_ports;
     uint32_t       cap_ports;
 
-    /* Last spa_io_position.clock.nsec — feeds audio_get_time_nsec. */
+    /* Last spa_io_position.clock.nsec - feeds audio_get_time_nsec. */
     uint64_t last_clock_nsec;
 
-    /* --- registry walker ----------------------------------------- */
+    /* Registry walker */
 
     struct pw_registry *registry;
     struct spa_hook     registry_listener;
@@ -303,7 +294,7 @@ struct audio_client
     int                 sync_seq;
     uint32_t            our_node_id;
 
-    /* "default" metadata object → effective default sink/source node names,
+    /* "default" metadata object -> effective default sink/source node names,
      * used to resolve the panel's "Follow default" device choice. */
     struct pw_metadata *default_metadata;
     struct spa_hook     default_metadata_listener;
@@ -311,7 +302,7 @@ struct audio_client
     char                default_source_name[256];
     _Atomic bool        default_changed; /* metadata cb set this on a real switch */
 
-    /* Discovered remote nodes (hardware + apps) — cached for assembling
+    /* Discovered remote nodes (hardware + apps) - cached for assembling
      * full port names ("node:port") and for audio_connect lookups. */
     struct audio_node_info **nodes;
     uint32_t                 n_nodes;
@@ -341,7 +332,7 @@ struct audio_port
     uint64_t              flags;
     audio_latency_range_t latency[2]; /* [CAPTURE, PLAYBACK] */
 
-    /* --- PipeWire port handle ------------------------------------- */
+    /* PipeWire port handle */
 
     enum pw_direction direction;
     void             *pw_filter_port; /* returned by pw_filter_add_port */
@@ -354,11 +345,11 @@ struct audio_port
     uint32_t pw_port_id;
 };
 
-/* per-port userdata block stored by pw_filter_add_port — holds a pointer
+/* per-port userdata block stored by pw_filter_add_port - holds a pointer
  * back to our audio_port so the filter events can find it. */
 typedef audio_port_t *audio_port_ref_t;
 
-/* --- Forward decls for filter events ------------------------------------ */
+/* Filter event forward declarations. */
 
 static void audio_on_state_changed(void *userdata, enum pw_filter_state old,
                                    enum pw_filter_state state, const char *error);
@@ -375,7 +366,7 @@ static const struct pw_filter_events audio_filter_events = {
     .process = audio_on_process,
 };
 
-/* --- Forward decls for core / registry events --------------------------- */
+/* Core and registry event forward declarations. */
 
 static void audio_on_core_done(void *userdata, uint32_t id, int seq);
 static void audio_on_registry_global(void *userdata, uint32_t id, uint32_t permissions,
@@ -398,9 +389,7 @@ static void audio_teardown_filter(audio_client_t *c);
 static void audio_sync(audio_client_t *c);
 static void audio_adopt_own_ports(audio_client_t *c);
 
-/* ----------------------------------------------------------------------
- * Lifecycle
- * ---------------------------------------------------------------------- */
+/* Lifecycle. */
 
 audio_client_t *
 audio_open(const char *client_name, uint32_t options, uint32_t *status)
@@ -422,7 +411,9 @@ audio_open(const char *client_name, uint32_t options, uint32_t *status)
     c->sample_rate = AUDIO_DEFAULT_SAMPLE_RATE;
     c->buffer_size = AUDIO_DEFAULT_BUFFER_SIZE;
     c->our_node_id = SPA_ID_INVALID;
+#ifndef PIPEASIO_AUDIO_UNIXLIB
     atomic_init(&c->rt.ready, false);
+#endif
 
     pw_init(NULL, NULL);
 
@@ -440,30 +431,17 @@ audio_open(const char *client_name, uint32_t options, uint32_t *status)
         goto fail_loop;
     }
 
-    /* Wire our Wine-thread spa_thread_utils so PipeWire spawns its RT
-     * thread via CreateThread (giving it a Wine TEB) — critical because
-     * any callback that bridges into PE code via Wine's loader will
-     * otherwise execute on a Wine-managed bridge stack with a
-     * mismatched __stack_chk_guard, which smashes the canary on return.
-     *
-     * Set the override on the context's data loop only (like pwasio): the
-     * data loop owns the RT process() thread, which must be a Win32 thread
-     * with a Wine TEB.  The pw_thread_loop main loop stays a plain pthread
-     * — it only runs registry/core events (libc allocation, no PE
-     * bridging), so it needs no TEB and no Win32 thread. */
+    /* Native build: create the PipeWire RT thread through CreateThread so it
+     * has a Wine TEB before it calls back into the ASIO host. */
+    c->data_loop = pw_context_get_data_loop(c->ctx);
+#ifndef PIPEASIO_AUDIO_UNIXLIB
     c->rt_iface.iface = SPA_INTERFACE_INIT(SPA_TYPE_INTERFACE_ThreadUtils, SPA_VERSION_THREAD_UTILS,
                                            &audio_rt_methods, &c->rt);
-    c->data_loop      = pw_context_get_data_loop(c->ctx);
     pw_data_loop_set_thread_utils(c->data_loop, &c->rt_iface);
+#endif
 
-    /* pw_context_new already started the data loop with the DEFAULT
-     * (plain-pthread) thread utils.  Installing our override now only
-     * affects the NEXT start, so stop the data loop here and restart it
-     * below — then its RT thread is allocated through audio_rt_create
-     * (Win32 CreateThread) and has a real Wine TEB.  Without this dance
-     * the override is dead: the process() callback runs on a foreign
-     * pthread and the ASIO host's COM bufferSwitch corrupts memory.
-     * (Mirrors pwasio's stop/restart sequence.) */
+    /* The data loop already started with default thread utils.  Restart it so
+     * the next RT thread uses audio_rt_create. */
     pw_data_loop_stop(c->data_loop);
 
     if (pw_thread_loop_start(c->loop) < 0)
@@ -589,7 +567,7 @@ audio_close(audio_client_t *c)
     return true;
 }
 
-/* Helper — tear down the pw_filter and per-port resources.
+/* Helper - tear down the pw_filter and per-port resources.
  * Safe to call multiple times; clears all state to "not active". */
 static void
 audio_teardown_filter(audio_client_t *c)
@@ -635,12 +613,7 @@ audio_activate(audio_client_t *c)
     const size_t bsize_samples = c->buffer_size;
     const size_t bsize_bytes   = bsize_samples * sizeof(audio_sample_t);
 
-    /* Build the filter's node-level properties.  FORCE_QUANTUM normally locks
-     * the PipeWire graph to the ASIO host's negotiated buffer size; in
-     * follow-device mode it is skipped so the target device (e.g. a Bluetooth
-     * sink whose clock cannot be slaved) drives the cycle.  FORCE_RATE is
-     * applied only when the user pins a sample rate (forced_rate != 0),
-     * otherwise the node follows the graph rate. */
+    /* FORCE_QUANTUM is skipped only when following the device clock. */
     struct pw_properties *filter_props = pw_properties_new(
             PW_KEY_NODE_NAME, c->name, PW_KEY_NODE_DESCRIPTION, c->name, PW_KEY_MEDIA_TYPE, "Audio",
             PW_KEY_MEDIA_CATEGORY, "Duplex", PW_KEY_MEDIA_ROLE, "DSP", PW_KEY_NODE_ALWAYS_PROCESS,
@@ -723,13 +696,8 @@ audio_activate(audio_client_t *c)
 
     pw_thread_loop_unlock(c->loop);
 
-    /* Start the data loop now — AFTER add_port/connect.  Those run in the
-     * thread-loop context and fail "wrong context: not in loop" if the
-     * filter's (data) loop is already running, so it stayed stopped since
-     * audio_open.  Starting it here spawns the RT thread via
-     * audio_rt_create (Wine TEB) and lets the node bind below and schedule
-     * process() on that bridged thread.  (Mirrors pwasio: filter set up
-     * with the data loop stopped, started in Start().) */
+    /* Start the data loop after add_port/connect; those need the thread-loop
+     * context while the data loop is stopped. */
     pw_thread_loop_lock(c->loop);
     if (pw_data_loop_start(c->data_loop) < 0)
     {
@@ -739,11 +707,7 @@ audio_activate(audio_client_t *c)
     }
     pw_thread_loop_unlock(c->loop);
 
-    /* Wait for the filter to bind: pw_filter_connect is async, and the
-     * node id only becomes valid once the daemon has BOUND the node
-     * proxy.  A single pw_core_sync isn't always enough (the BOUND
-     * event can be in flight when sync DONE is processed), so we poll
-     * with a timed wait that gets kicked by audio_on_state_changed. */
+    /* Wait until the async pw_filter_connect bind publishes a node id. */
     {
         pw_thread_loop_lock(c->loop);
         struct timespec abstime;
@@ -765,7 +729,7 @@ audio_activate(audio_client_t *c)
             }
             if (pw_thread_loop_timed_wait_full(c->loop, &abstime) < 0)
             {
-                /* Timed out — try one more sync as a last resort. */
+                /* Last sync before giving up on the bind wait. */
                 pw_thread_loop_unlock(c->loop);
                 WARN("audio_activate: filter bind timed out, forcing sync\n");
                 audio_sync(c);
@@ -779,12 +743,8 @@ audio_activate(audio_client_t *c)
 
     TRACE("audio_activate: filter bound, our_node_id=%u\n", c->our_node_id);
 
-    /* The filter is bound, but the daemon emits the globals for the
-     * filter's own ports slightly later, as the node activates.  A single
-     * sync isn't enough — poll sync+adopt until every registered port has
-     * a PipeWire port id, so the connect-to-hardware links in CreateBuffers
-     * can resolve them.  Bounded to ~1s; proceed with whatever adopted if
-     * it overruns. */
+    /* Port globals may arrive after the filter node is bound; adopt them with
+     * a bounded poll so CreateBuffers can connect to hardware. */
     for (int attempt = 0; attempt < 50; attempt++)
     {
         audio_sync(c);
@@ -837,9 +797,7 @@ audio_get_client_name(audio_client_t *c)
     return c ? c->name : NULL;
 }
 
-/* ----------------------------------------------------------------------
- * Properties
- * ---------------------------------------------------------------------- */
+/* Properties. */
 
 audio_nframes_t
 audio_get_sample_rate(audio_client_t *c)
@@ -861,10 +819,7 @@ audio_set_buffer_size(audio_client_t *c, audio_nframes_t nframes)
     c->buffer_size = nframes;
     if (c->buffer_size_cb)
         c->buffer_size_cb(nframes, c->buffer_size_cb_arg);
-    /* Applied on the next audio_activate, which rebuilds the filter with
-     * the new PW_KEY_NODE_FORCE_QUANTUM (host path: DisposeBuffers →
-     * audio_deactivate, then CreateBuffers → audio_set_buffer_size →
-     * audio_activate). */
+    /* Applied by the next audio_activate. */
     return true;
 }
 
@@ -898,13 +853,7 @@ audio_get_time_nsec(audio_client_t *c)
     return c ? c->last_clock_nsec : 0;
 }
 
-/* ----------------------------------------------------------------------
- * Ports.  audio_port_register allocates an audio_port_t and appends it to
- * the client's port array; audio_activate turns each into a pw_filter
- * port.  During a process cycle audio_port_get_buffer returns the live
- * MAP_BUFFERS mmap (cycle_buffer->buffer->datas[0].data); outside a cycle
- * it returns NULL.
- * ---------------------------------------------------------------------- */
+/* Ports. */
 
 audio_port_t *
 audio_port_register(audio_client_t *c, const char *port_name, const char *port_type, uint64_t flags,
@@ -1022,11 +971,7 @@ audio_port_by_name(audio_client_t *c, const char *port_name)
     return NULL;
 }
 
-/* Resolve the effective PipeWire default sink (for sink/INPUT ports we write
- * to) or default source (for source/OUTPUT ports we read from) to a discovered
- * node id — but only when that node actually has a matching port.  Returns
- * SPA_ID_INVALID when no usable default is known, so callers fall back to the
- * first-seen device.  Names come from the "default" metadata object. */
+/* Resolve the PipeWire default node only when it has a matching port. */
 static uint32_t
 audio_preferred_default_node(audio_client_t *c, uint64_t flags)
 {
@@ -1070,22 +1015,12 @@ audio_get_ports(audio_client_t *c, const char *port_name_pattern, const char *ty
 
     pw_thread_loop_lock(c->loop);
 
-    /* Collect indices of matching discovered ports.  asio.c asks for:
-     *   PHYSICAL|OUTPUT — hardware sources (mic-like) we'll read FROM
-     *   PHYSICAL|INPUT  — hardware sinks (speaker-like) we'll write TO
-     */
+    /* Matching hardware ports in the direction requested by asio.c. */
     uint32_t *match_idx = NULL;
     uint32_t  n_match   = 0;
     uint32_t  cap       = 0;
 
-    /* Restrict the result to a SINGLE device (the node of the first
-     * matching port).  asio.c's connect-to-hardware then wires our ports
-     * to exactly one sink/source instead of spanning every device in
-     * discovery order — a single filter node linked across multiple
-     * hardware clocks (analog + HDMI + ...) is forced async by PipeWire,
-     * which yields 1 buffer/port + constant renegotiation = buzzing.
-     * We prefer the PipeWire default sink/source (resolved from the "default"
-     * metadata) and fall back to the first-seen device when none is known. */
+    /* Use one hardware node per direction to avoid async links across devices. */
     uint32_t target_node = audio_preferred_default_node(c, flags);
     for (uint32_t i = 0; i < c->n_discovered; i++)
     {
@@ -1226,9 +1161,7 @@ audio_port_get_latency_range(audio_port_t *p, uint32_t mode, audio_latency_range
     *range = p->latency[mode == AUDIO_PLAYBACK_LATENCY ? 1 : 0];
 }
 
-/* ----------------------------------------------------------------------
- * Callbacks
- * ---------------------------------------------------------------------- */
+/* Callbacks. */
 
 bool
 audio_set_process_callback(audio_client_t *c, audio_process_cb cb, void *arg)
@@ -1270,9 +1203,7 @@ audio_set_latency_callback(audio_client_t *c, audio_latency_cb cb, void *arg)
     return true;
 }
 
-/* ----------------------------------------------------------------------
- * Connections / transport / memory
- * ---------------------------------------------------------------------- */
+/* Connections, transport, and memory. */
 
 /* Look up a port by full name.  Returns the matching audio_port_t* and
  * fills *node_id_out.  Searches the discovered cache and our own ports. */
@@ -1367,12 +1298,7 @@ audio_free_ports(const char **ports)
     free((void *)ports);
 }
 
-/* ----------------------------------------------------------------------
- * Filter event callbacks — fire on the PipeWire data thread.  Because the
- * data thread was spawned by our audio_rt_create, it is a real Wine
- * thread; calling back into asio.c's process_cb (which then calls the
- * host's ASIO COM bufferSwitch) is safe.
- * ---------------------------------------------------------------------- */
+/* Filter callbacks run on the bridged data thread in native builds. */
 
 static void
 audio_on_state_changed(void *userdata, enum pw_filter_state old, enum pw_filter_state state,
@@ -1427,13 +1353,7 @@ audio_on_process(void *userdata, struct spa_io_position *position)
         c->last_clock_nsec = position->clock.nsec;
     }
 
-    /* Dequeue this cycle's buffer for every port.  Because the ports use
-     * PW_FILTER_PORT_FLAG_MAP_BUFFERS, pw_filter has already mmap'd each
-     * buffer's shared memory into datas[0].data — the SAME memory the
-     * daemon plays (outputs) or just captured into (inputs).  The ASIO
-     * host therefore writes/reads straight into the live buffer via
-     * audio_port_get_buffer, and we queue back exactly the buffer we
-     * dequeued (the standard pw_filter contract). */
+    /* audio_port_get_buffer exposes the live MAP_BUFFERS memory for this cycle. */
     for (uint32_t i = 0; i < c->n_ports; i++)
     {
         audio_port_t *p = c->ports[i];
@@ -1447,13 +1367,7 @@ audio_on_process(void *userdata, struct spa_io_position *position)
     if (c->follow_device && quantum)
         atomic_store(&c->observed_quantum, quantum);
 
-    /* Decisive #3 signal: the host's bufferSwitch runs once per process() for
-     * c->buffer_size frames, but we emit `quantum` frames to the graph — so
-     * playback speed scales as buffer_size/quantum.  They MUST be equal; if
-     * the daemon clamped our forced quantum (pinned clock.min/max-quantum)
-     * they diverge and audio runs slow/pitched-down.  Warn once (the data
-     * loop is single-threaded here), unconditionally so it shows without
-     * PIPEASIO_DEBUG. */
+    /* bufferSwitch and PipeWire must run at the same quantum. */
     if (quantum && quantum != c->buffer_size)
     {
         static bool quantum_warned;
@@ -1475,9 +1389,8 @@ audio_on_process(void *userdata, struct spa_io_position *position)
         if (++cycle_count <= 8 || (cycle_count < 100 && cycle_count % 10 == 0)
             || (cycle_count >= 100 && cycle_count % 100 == 0))
             TRACE("process: cycle=%lu tid=%lx buffer_size=%u quantum=%u rate=%u/%u\n",
-                  (unsigned long)cycle_count, (unsigned long)GetCurrentThreadId(),
-                  (unsigned)c->buffer_size, (unsigned)quantum,
-                  position ? (unsigned)position->clock.rate.num : 0u,
+                  (unsigned long)cycle_count, audio_current_thread_id(), (unsigned)c->buffer_size,
+                  (unsigned)quantum, position ? (unsigned)position->clock.rate.num : 0u,
                   position ? (unsigned)position->clock.rate.denom : 0u);
     }
 
@@ -1512,11 +1425,7 @@ audio_on_process(void *userdata, struct spa_io_position *position)
     }
 }
 
-/* ----------------------------------------------------------------------
- * Core sync — block until the daemon acknowledges that every prior
- * request has been processed.  Used after registry binding (initial
- * port enumeration) and after pw_filter_connect (filter port discovery).
- * ---------------------------------------------------------------------- */
+/* Core sync completion. */
 
 static void
 audio_on_core_done(void *userdata, uint32_t id, int seq)
@@ -1588,12 +1497,7 @@ audio_adopt_own_ports(audio_client_t *c)
     pw_thread_loop_unlock(c->loop);
 }
 
-/* ----------------------------------------------------------------------
- * Registry walker — caches PipeWire Nodes and Ports so audio_get_ports
- * and audio_connect can resolve names ↔ IDs.  Filter rules adapted from
- * pwasio's design (we ignore monitor ports, Internal media classes, and
- * non-audio media types).
- * ---------------------------------------------------------------------- */
+/* Registry walker. */
 
 static struct audio_node_info *
 audio_find_node(audio_client_t *c, uint32_t id)
@@ -1620,16 +1524,11 @@ audio_cache_node(audio_client_t *c, uint32_t id, const struct spa_dict *props)
     if (!node_name)
         return;
 
-    /* Always cache our OWN filter node — matched by the node name we set,
-     * or by its id once bound.  A Duplex/DSP filter carries no "Audio"
-     * media.class, so without this audio_find_node() can't resolve it and
-     * the registry globals for our own ports get dropped as orphans in
-     * audio_cache_port (below), leaving audio_connect unable to link them
-     * -> no sound. */
+    /* Cache our own DSP/filter node even though it has no Audio media.class. */
     int is_ours = (c->our_node_id != SPA_ID_INVALID && id == c->our_node_id)
                   || (c->name && !strcmp(node_name, c->name));
 
-    /* Otherwise only cache audio nodes — saves us from holding refs to
+    /* Otherwise only cache audio nodes - saves us from holding refs to
      * every stream/module/etc. */
     if (!is_ours)
     {
@@ -1734,8 +1633,8 @@ audio_cache_port(audio_client_t *c, uint32_t id, const struct spa_dict *props)
     p->pw_port_id = id;
 
     /* asio.c asks for PHYSICAL|OUTPUT to list capture sources and
-     * PHYSICAL|INPUT to list playback sinks.  Map PW "out" → OUTPUT,
-     * "in" → INPUT. */
+     * PHYSICAL|INPUT to list playback sinks.  Map PW "out" -> OUTPUT,
+     * "in" -> INPUT. */
     p->flags = AUDIO_PORT_IS_PHYSICAL
                | ((dir == PW_DIRECTION_OUTPUT) ? AUDIO_PORT_IS_OUTPUT : AUDIO_PORT_IS_INPUT);
 

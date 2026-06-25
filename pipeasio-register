@@ -7,13 +7,7 @@ if [ ! -d "${WINEPREFIX}" ]; then
     wineboot -u || exit $?
 fi
 
-# Candidate Wine "prefix" roots where both halves of PipeASIO may live:
-#   <root>/x86_64-windows/pipeasio64.dll       (PE fake)
-#   <root>/x86_64-unix/pipeasio64.dll.so       (ELF)
-#
-# Order matters: PIPEASIO_PREFIX (explicit) > user-local > distro > legacy.
-# User-local first so a non-root `cmake --install --prefix $HOME/.local`
-# is picked over an older system-wide install.
+# Candidate install roots, in preference order.
 candidates=(
     "${PIPEASIO_PREFIX:+${PIPEASIO_PREFIX}/lib/wine}"
     "${HOME}/.local/lib/wine"
@@ -44,17 +38,40 @@ fi
 
 >&2 echo "[${me}] using PipeASIO install at ${prefix}"
 
-# Stage the PE fake into the prefix's system32 so COM registration's
-# LoadLibrary resolves pipeasio64.dll by name.
+# Stage the PE half where regsvr32 can LoadLibrary it by name.
 cp -v --no-preserve mode "${prefix}/x86_64-windows/pipeasio64.dll" \
                          "${WINEPREFIX}/drive_c/windows/system32/" || exit $?
 
-# WINEDLLPATH lets Wine (host wine for this registration; Proton's wine at
-# runtime — both need it for user-local installs) find the ELF .so half
-# next to its PE companion. Prepend, don't replace.
+# Let Wine find the ELF half next to the PE half.
 export WINEDLLPATH="${prefix}${WINEDLLPATH:+:${WINEDLLPATH}}"
 wine regsvr32 pipeasio64.dll
 code=$?
+
+# Optional 32-bit WoW64 registration.
+if [ ${code} -eq 0 ] \
+   && [ -e "${prefix}/i386-windows/pipeasio32.dll" ] \
+   && [ -e "${prefix}/x86_64-unix/pipeasio32.so" ]; then
+    >&2 echo "[${me}] registering experimental WoW64 32-bit front end"
+    mkdir -p "${WINEPREFIX}/drive_c/windows/syswow64" || exit $?
+    cp -v --no-preserve mode "${prefix}/i386-windows/pipeasio32.dll" \
+                             "${WINEPREFIX}/drive_c/windows/syswow64/" || exit $?
+    wine reg add \
+        'HKCR\CLSID\{2D3CA9E2-1193-4C5D-B5FD-38798F3DC074}\InprocServer32' \
+        /ve /t REG_SZ /d 'pipeasio32.dll' /f /reg:32 || exit $?
+    wine reg add \
+        'HKCR\CLSID\{2D3CA9E2-1193-4C5D-B5FD-38798F3DC074}\InprocServer32' \
+        /v ThreadingModel /t REG_SZ /d Apartment /f /reg:32 || exit $?
+    wine reg add \
+        'HKCU\Software\Wine\DllOverrides' \
+        /v pipeasio32 /t REG_SZ /d builtin /f /reg:32 || exit $?
+    wine reg add \
+        'HKLM\Software\ASIO\PipeASIO' \
+        /v CLSID /t REG_SZ /d '{2D3CA9E2-1193-4C5D-B5FD-38798F3DC074}' /f /reg:32 || exit $?
+    wine reg add \
+        'HKLM\Software\ASIO\PipeASIO' \
+        /v Description /t REG_SZ /d 'PipeASIO Driver' /f /reg:32 || exit $?
+    >&2 echo "[${me}] 32-bit WoW64 front end registered"
+fi
 
 if [ ${code} -eq 0 ]; then
     >&2 echo "[${me}] registered in ${WINEPREFIX}"

@@ -1,5 +1,4 @@
-# Standalone Wine PE program that exercises PipeASIO via its COM
-# interface so we don't need FL Studio / Proton / Faugus to iterate.
+# Wine PE probe host.
 
 find_program(WINEGCC winegcc REQUIRED)
 
@@ -21,7 +20,7 @@ add_custom_command(
 
 add_custom_target(asio_probe ALL DEPENDS "${PROBE_OUT}")
 
-# Copy the runner scripts next to the binary so they ship in build/tests.
+# Copy runners next to the probe.
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/run.sh"
     "${CMAKE_CURRENT_BINARY_DIR}/run.sh"
@@ -32,3 +31,27 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/gdb.sh"
     @ONLY
 )
+
+# Optional i386 PE probe for WoW64.
+if(BUILD_WOW64_32)
+    find_program(I686_W64_MINGW_GCC i686-w64-mingw32-gcc)
+    if(I686_W64_MINGW_GCC)
+        set(PROBE32_OUT "${CMAKE_CURRENT_BINARY_DIR}/asio_probe32.exe")
+        add_custom_command(
+            OUTPUT  "${PROBE32_OUT}"
+            COMMAND ${I686_W64_MINGW_GCC} -mconsole -O0 -g -Wall -Wextra
+                               "${PROBE_SRC}"
+                               -lole32
+                               -o "${PROBE32_OUT}"
+            DEPENDS "${PROBE_SRC}"
+            COMMENT "mingw asio_probe32.exe (32-bit WoW64 PE host)"
+            VERBATIM
+        )
+        add_custom_target(asio_probe32 ALL DEPENDS "${PROBE32_OUT}")
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/run32.sh"
+            "${CMAKE_CURRENT_BINARY_DIR}/run32.sh"
+            @ONLY
+        )
+    endif()
+endif()

@@ -17,27 +17,18 @@
  * this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/*
- * audio.h — backend-agnostic audio API surface for PipeASIO.
- *
- * Implemented natively on libpipewire-0.3 in src/audio.c: a single
- * pw_thread_loop drives a pw_filter, with custom spa_thread_utils
- * bridging the PipeWire RT thread to Wine via CreateThread.  asio.c
- * sees only this header — PipeWire terminology is encapsulated below
- * this line.
- */
+/* Backend-agnostic audio API surface for PipeASIO. */
 #pragma once
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 
-/* --- Opaque handle types ------------------------------------------------ */
+/* Opaque handles */
 
 typedef struct audio_client audio_client_t;
 typedef struct audio_port   audio_port_t;
 
-/* --- Concrete value types ----------------------------------------------- */
+/* Value types */
 
 typedef uint32_t audio_nframes_t;
 typedef float    audio_sample_t;
@@ -54,14 +45,14 @@ typedef enum
     AUDIO_PLAYBACK_LATENCY = 1,
 } audio_latency_mode_t;
 
-/* --- Callback signatures ------------------------------------------------ */
+/* Callback signatures */
 
 typedef int (*audio_process_cb)(audio_nframes_t nframes, void *arg);
 typedef int (*audio_buffer_size_cb)(audio_nframes_t nframes, void *arg);
 typedef int (*audio_sample_rate_cb)(audio_nframes_t nframes, void *arg);
 typedef void (*audio_latency_cb)(audio_latency_mode_t mode, void *arg);
 
-/* --- Constants ---------------------------------------------------------- */
+/* Constants */
 
 #define AUDIO_DEFAULT_TYPE "32 bit float mono audio"
 
@@ -74,7 +65,7 @@ typedef void (*audio_latency_cb)(audio_latency_mode_t mode, void *arg);
 #define AUDIO_PORT_IS_OUTPUT 0x02u
 #define AUDIO_PORT_IS_PHYSICAL 0x04u
 
-/* --- Lifecycle ---------------------------------------------------------- */
+/* Lifecycle */
 
 audio_client_t *audio_open(const char *client_name, uint32_t options, uint32_t *status);
 bool            audio_close(audio_client_t *client);
@@ -82,7 +73,7 @@ bool            audio_activate(audio_client_t *client);
 bool            audio_deactivate(audio_client_t *client);
 const char     *audio_get_client_name(audio_client_t *client);
 
-/* --- Properties --------------------------------------------------------- */
+/* Properties */
 
 audio_nframes_t audio_get_sample_rate(audio_client_t *client);
 audio_nframes_t audio_get_buffer_size(audio_client_t *client);
@@ -95,7 +86,7 @@ void audio_set_forced_rate(audio_client_t *client, audio_nframes_t rate);
 /* When set, the next audio_activate does NOT pin the graph quantum
  * (PW_KEY_NODE_FORCE_QUANTUM): the filter becomes a follower so the target
  * device (e.g. a Bluetooth sink whose clock cannot be slaved) drives the cycle.
- * Default off — wired devices keep the forced low-latency quantum. */
+ * Default off; wired devices keep the forced low-latency quantum. */
 void audio_set_follow_device(audio_client_t *client, bool follow);
 
 /* Most recent graph quantum (clock.duration) the process callback observed
@@ -107,7 +98,7 @@ audio_nframes_t audio_observed_quantum(audio_client_t *client);
  * 0 before the first cycle. Feeds the ASIO host's systemTime. */
 uint64_t audio_get_time_nsec(audio_client_t *client);
 
-/* --- Ports -------------------------------------------------------------- */
+/* Ports */
 
 audio_port_t *audio_port_register(audio_client_t *client, const char *port_name,
                                   const char *port_type, uint64_t flags, uint64_t buffer_size);
@@ -130,14 +121,14 @@ const char **audio_get_device_ports(audio_client_t *client, const char *node_nam
 bool audio_default_changed(audio_client_t *client);
 void audio_port_get_latency_range(audio_port_t *port, uint32_t mode, audio_latency_range_t *range);
 
-/* --- Callbacks ---------------------------------------------------------- */
+/* Callbacks */
 
 bool audio_set_process_callback(audio_client_t *client, audio_process_cb cb, void *arg);
 bool audio_set_buffer_size_callback(audio_client_t *client, audio_buffer_size_cb cb, void *arg);
 bool audio_set_sample_rate_callback(audio_client_t *client, audio_sample_rate_cb cb, void *arg);
 bool audio_set_latency_callback(audio_client_t *client, audio_latency_cb cb, void *arg);
 
-/* --- Connections / memory ------------------------------------------------ */
+/* Connections / memory */
 
 bool audio_connect(audio_client_t *client, const char *src, const char *dst);
 void audio_free(void *ptr);

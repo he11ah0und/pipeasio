@@ -30,7 +30,7 @@
 #include "winreg.h"
 #include "objbase.h"
 
-#ifdef DEBUG
+#if defined(DEBUG) && !defined(PIPEASIO_WOW64_PE)
 #include "wine/debug.h"
 #endif
 

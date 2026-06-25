@@ -2,7 +2,7 @@
 *.dll
 *.o
 *.so
-build/
+build*/
 
 # Untracked research notes
 reserach/

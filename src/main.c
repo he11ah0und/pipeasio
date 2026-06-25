@@ -27,7 +27,7 @@
 #include "objbase.h"
 #include "unknwn.h"
 
-#ifdef DEBUG
+#if defined(DEBUG) && !defined(PIPEASIO_WOW64_PE)
 #include "wine/debug.h"
 #endif
 
