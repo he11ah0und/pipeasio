@@ -24,7 +24,7 @@ ASIO is the standard low-latency audio driver on Windows. Music programs (DAWs)
 such as FL Studio, Ableton Live, and Reaper rely on it for responsive playback
 and recording. PipeASIO provides that driver inside Wine and connects it
 straight to PipeWire, the audio system modern Linux distributions use. Your DAW
-sees a normal ASIO device; PipeWire sees a normal audio app it can route
+sees a normal ASIO device. PipeWire sees a normal audio app it can route
 anywhere.
 
 It works in plain Wine and inside Proton and Steam (Faugus, Proton-CachyOS),
@@ -34,7 +34,7 @@ drivers.
 ![PipeASIO settings panel](docs/panel-settings.png)
 
 > [!NOTE]
-> PipeASIO is at **1.0.0**. It is verified with FL Studio under Proton-CachyOS and with the [VB-Audio ASIO Test](https://forum.vb-audio.com/viewtopic.php?p=4259#p4259) utility (64-bit); other ASIO hosts such as Reaper and Ableton Live should work but are not yet confirmed. x86_64 only. Bug reports are very welcome on the [issue tracker](https://github.com/M0n7y5/pipeasio/issues).
+> PipeASIO is at **1.0.0**. It is verified with FL Studio under Proton-CachyOS and with the [VB-Audio ASIO Test](https://forum.vb-audio.com/viewtopic.php?p=4259#p4259) utility (64-bit). Other ASIO hosts such as Reaper and Ableton Live should work but are not yet confirmed. x86_64 only. Bug reports are very welcome on the [issue tracker](https://github.com/M0n7y5/pipeasio/issues).
 
 ## Quick start
 
@@ -54,7 +54,7 @@ Everywhere else, build from source:
 # Build
 cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
 
-# Install (user-local; use --prefix /usr for system-wide)
+# Install (user-local, or --prefix /usr for system-wide)
 cmake --install build --prefix "$HOME/.local"
 
 # Register in the current Wine prefix
@@ -65,13 +65,14 @@ Under Proton or Steam, also set `WINEDLLPATH=$HOME/.local/lib/wine` in the launc
 
 ## Building
 
-CMake only, x86_64 only.
+CMake only. The driver is 64-bit. Opt-in 32-bit (WoW64) support for 32-bit
+Windows hosts is covered in [32-bit applications](#32-bit-applications-experimental).
 
 Requirements: `cmake` (3.20 or newer), `ninja-build` (recommended) or GNU make,
 `gcc`, the Wine SDK (`wine-devel` / `winehq-stable-dev`), `pkg-config`, and
 `libpipewire-0.3-dev`. The optional Qt6 settings panel also needs a C++ compiler
 and `qt6-base-dev`. The panel builds by default when those are present and is
-skipped otherwise; pass `-DBUILD_SETTINGS_PANEL=OFF` to force it off.
+skipped otherwise. Pass `-DBUILD_SETTINGS_PANEL=OFF` to force it off.
 
 ```sh
 cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -95,7 +96,7 @@ paru -S pipeasio
 
 The package installs the driver system-wide under `/usr`, plus the
 `pipeasio-settings` panel with a desktop entry and icon. Note that a
-system-wide install is invisible to Proton's container; see the Proton /
+system-wide install is invisible to Proton's container. See the Proton /
 Steam / Faugus section below.
 
 ### From source
@@ -150,6 +151,47 @@ env WINEPREFIX="$HOME/asioapp" pipeasio-register
 then distro variants, then `/opt/wine-{devel,stable,staging}`. Set
 `PIPEASIO_PREFIX` to point it at a non-standard install.
 
+## 32-bit applications (experimental)
+
+PipeASIO is 64-bit by default. A front end for **32-bit** Windows ASIO hosts
+(foobar2000 `foo_out_asio`, older REAPER builds, ...) can be built opt-in via
+Wine's *new WoW64*: the 32-bit half is a thin PE thunk that forwards every ASIO
+call to the same 64-bit PipeWire backend over `__wine_unix_call`. There is no
+32-bit libpipewire and no 32-bit Linux userspace - only the Windows-facing half
+is i386.
+
+> **Experimental, off by default.** The 64-bit driver is byte-for-byte
+> unaffected. The 32-bit path is validated end-to-end by the `asio_probe32`
+> host (full `Init -> CreateBuffers -> Start` COM + real-time round trip).
+> Bit-exact loopback validation on 32-bit is still pending.
+
+It needs a MinGW cross-compiler on top of the normal build requirements:
+
+```sh
+sudo pacman -S mingw-w64-gcc          # Arch / CachyOS
+sudo apt install gcc-mingw-w64-i686   # Debian / Ubuntu
+```
+
+Configure with `-DBUILD_WOW64_32=ON` (default OFF). Set `WINE_LIB_ROOT` if your
+Wine library prefix is not `/usr/lib/wine`:
+
+```sh
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_WOW64_32=ON
+cmake --build build
+```
+
+Installing then lays the 32-bit halves alongside the 64-bit ones:
+
+```
+<prefix>/lib/wine/i386-windows/pipeasio32.dll    (PE thunk, builtin)
+<prefix>/lib/wine/x86_64-unix/pipeasio32.so      (unixlib, 64-bit ELF)
+```
+
+`pipeasio-register` handles both architectures automatically: it registers the
+CLSID under the 64-bit registry view and, when `pipeasio32.dll` is present, the
+same CLSID under the 32-bit view (`regsvr32 /reg:32`). 32-bit and 64-bit hosts
+can then use PipeASIO from the same prefix.
+
 ## Proton / Steam / Faugus
 
 Proton runs Wine inside a pressure-vessel container (steamrt4). The container does
@@ -175,7 +217,7 @@ Proton's Wine. Two things make PipeASIO work inside Proton:
    WINEDLLPATH=/home/<you>/.local/lib/wine
    ```
 
-   Use the absolute path; Faugus does not expand `~` or `$HOME` in that field.
+   Use the absolute path. Faugus does not expand `~` or `$HOME` in that field.
 
 Then register PipeASIO in the Proton wineprefix as usual:
 
@@ -185,6 +227,30 @@ env WINEPREFIX="$HOME/Faugus/<game>" pipeasio-register
 
 The PE stub lands in `<prefix>/drive_c/windows/system32/` and the CLSID
 registration persists in the prefix registry, both shared across Wine versions.
+
+## Other distributions
+
+Active support targets Arch Linux and its derivatives (CachyOS, EndeavourOS,
+Manjaro), but PipeASIO itself is distribution-agnostic: it is plain
+`libpipewire-0.3` plus Wine, with no distro-specific code paths, so it runs
+wherever those are available. A few environment details differ between distros
+and are the usual causes of trouble elsewhere:
+
+- **Wine library layout.** Both DLL halves must land under the distro's
+  `lib/wine/x86_64-{windows,unix}/` directory: `/usr/lib/wine` on Arch,
+  `/usr/lib/x86_64-linux-gnu/wine` on Debian/Ubuntu, `/usr/lib64/wine` on
+  Fedora. Match it with `--prefix` / `CMAKE_INSTALL_LIBDIR` (or `WINE_LIB_ROOT`
+  for the 32-bit build). A user-local `--prefix "$HOME/.local"` install plus
+  `WINEDLLPATH` sidesteps the question entirely.
+- **Wine version.** The 64-bit driver runs on current Wine. Wine 10+ needs the
+  `pipeasio.dll` symlinks the install creates (see [Installing](#installing)).
+  The experimental 32-bit front end additionally requires Wine's *new WoW64*.
+  Older or split-WoW64 Wine cannot load it.
+- **PipeWire version.** 1.6 or newer is needed for the forced quantum/rate that
+  pins low latency. On older PipeWire the driver still runs but logs a warning
+  and follows the graph's own quantum, so latency is higher.
+- **Real-time priority.** The most common reason low latency is worse off Arch.
+  See [Performance](#performance).
 
 ## Configuration
 
@@ -218,7 +284,7 @@ time the driver reconnects.
 Env: `PIPEASIO_OUTPUT_DEVICE`, `PIPEASIO_INPUT_DEVICE`.
 
 ### sample_rate
-`0` (default) follows the PipeWire graph rate; a non-zero value pins the rate with
+`0` (default) follows the PipeWire graph rate. A non-zero value pins the rate with
 `PW_KEY_NODE_FORCE_RATE`.
 Env: `PIPEASIO_SAMPLE_RATE`.
 
@@ -233,7 +299,7 @@ Default 0 (off): the driver pins the PipeWire graph quantum to the host's buffer
 size and runs as its own low-latency clock master, which is correct for wired
 devices. Set to 1 to make the driver a follower instead: it drops `FORCE_QUANTUM`
 so the target device drives the cycle. This is required for Bluetooth sinks, whose
-clock is the radio link and cannot be slaved to the host; otherwise PipeWire
+clock is the radio link and cannot be slaved to the host. Otherwise PipeWire
 silently drops the links and you get no sound. The buffer size is then dictated by
 the device (the driver settles to the device's quantum after one automatic reset),
 so latency is higher.
@@ -241,7 +307,7 @@ Env: `PIPEASIO_FOLLOW_DEVICE_CLOCK` (`on`/`off`).
 
 ### buffer_size
 The preferred size returned by `GetBufferSize()`. Must be a power of two within
-[16, 8192]; out-of-range values fall back to 1024.
+[16, 8192]. Out-of-range values fall back to 1024.
 Env: `PIPEASIO_PREFERRED_BUFFERSIZE`.
 
 A size the hardware does not support makes PipeWire reject the request or insert
@@ -256,11 +322,18 @@ Env: `PIPEASIO_CLIENT_NAME`.
 
 A few knobs affect xrun-free, low-latency operation:
 
+- Real-time scheduling. The audio threads run at `SCHED_FIFO`, which the kernel
+  grants only if your user may take real-time priority. On Arch and CachyOS the
+  `realtime-privileges` package handles this (the `audio` group plus an `rtprio`
+  rule in `/etc/security/limits.d/`). On other distributions you usually set it
+  up yourself, as the driver does not use rtkit. Without the grant the threads
+  fall back to normal scheduling and small buffers become far more xrun-prone.
+  Verify with `ulimit -r` (it should be at least 80).
 - Channel count. Every input and output is a PipeWire port the graph must
-  schedule. Defaults are 2 in / 2 out; raise `inputs` / `outputs` only to what you
+  schedule. Defaults are 2 in / 2 out. Raise `inputs` / `outputs` only to what you
   route. Fewer ports mean a smaller graph and less overhead.
 - Buffer size. Smaller buffers cut latency but raise CPU and xrun risk.
-- Debug logging. `PIPEASIO_DEBUG=1` makes the driver log on the audio path; leave
+- Debug logging. `PIPEASIO_DEBUG=1` makes the driver log on the audio path. Leave
   it off for normal use.
 
 ## Settings panel
@@ -300,7 +373,7 @@ xargs rm -f < build/install_manifest.txt
 ## Development
 
 Recommended VS Code extensions are listed in `.vscode/extensions.json`. The build
-emits `build/compile_commands.json` for clangd; the in-tree `.clang-format` and
+emits `build/compile_commands.json` for clangd. The in-tree `.clang-format` and
 `.editorconfig` keep diffs clean.
 
 ### Technical background
@@ -330,11 +403,18 @@ SWEEP=1 ./build/tests/asio_loopback/run.sh   # buffer-size x sample-rate matrix
 The loopback analyzer plays a per-channel frame counter out of the driver's
 output ports and verifies it on the input ports after a PipeWire null-sink
 loopback. Because PipeASIO is float32 end-to-end, the round trip must be
-**bit-exact**; the tool fails on any corrupted sample, dropped or duplicated
+**bit-exact**. The tool fails on any corrupted sample, dropped or duplicated
 buffer, swapped channel, or a measured round-trip latency that disagrees with
 `GetLatencies()` by more than one buffer. `SWEEP=1` repeats this across buffer
 sizes 128-1024 and forced sample rates 44.1/48/96 kHz, re-negotiating buffers
 in-process the same way a DAW does when you change the buffer size.
+
+When built with `-DBUILD_WOW64_32=ON`, a 32-bit analogue of the probe exercises
+the full COM + real-time round trip on a 32-bit (WoW64) host:
+
+```sh
+./build/tests/asio_probe/run32.sh      # 32-bit WoW64 driver (needs MinGW + a 32-bit prefix)
+```
 
 If you package PipeASIO, consider installing the `pipeasio-register` helper script
 as part of the package.
@@ -350,7 +430,7 @@ PipeASIO builds on [WineASIO](https://github.com/wineasio/wineasio) and the work
 ## License
 
 PipeASIO is licensed under the GNU General Public License, version 3 or later
-(`GPL-3.0-or-later`); see [`COPYING`](COPYING). It is a fork of WineASIO and
+(`GPL-3.0-or-later`). See [`COPYING`](COPYING). It is a fork of WineASIO and
 retains the original authors' copyright notices, and every source file carries
 an `SPDX-License-Identifier` tag.
 
