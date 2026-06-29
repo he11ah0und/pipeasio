@@ -42,7 +42,7 @@
       "image": "https://m0n7y5.github.io/pipeasio/og.png",
       "applicationCategory": "MultimediaApplication",
       "operatingSystem": "Linux",
-      "softwareVersion": "1.0.0",
+      "softwareVersion": "1.2.0",
       "softwareRequirements": "Wine, PipeWire 1.6+",
       "license": "https://www.gnu.org/licenses/gpl-3.0.html",
       "codeRepository": "https://github.com/M0n7y5/pipeasio",
@@ -253,6 +253,7 @@
       <a href="#compare" class="hide-sm">Compare</a>
       <a href="#quickstart">Get&nbsp;started</a>
       <a href="https://github.com/M0n7y5/pipeasio">GitHub</a>
+      <a href="https://ko-fi.com/m0n7y5">Support</a>
     </nav>
   </div>
 </header>
@@ -263,7 +264,7 @@
       <h1 class="fu">Pipe<span class="dot">ASIO</span></h1>
       <p class="tag fu d1">Low-latency <b>ASIO audio</b> for Windows DAWs on Linux. Runs under <b>Wine and Proton</b>, native to <b>PipeWire</b>.</p>
       <div class="badges fu d2">
-        <span class="pill"><b>v1.0.0</b></span>
+        <span class="pill"><b>v1.2.0</b></span>
         <span class="pill">x86_64</span>
         <span class="pill">PipeWire&nbsp;1.6+</span>
         <span class="pill">Wine&nbsp;10+</span>
@@ -355,7 +356,7 @@
         <div class="card"><h3>PipeWire native</h3><p>Talks to <code>libpipewire-0.3</code> directly through a <code>pw_filter</code> DSP node. No JACK, no <code>libjack.so.0</code> at runtime.</p></div>
         <div class="card"><h3>Runs under Proton</h3><p>Loads inside the Steam Runtime steamrt4 container that Proton uses, via a host-provided <code>WINEDLLPATH</code>.</p></div>
         <div class="card"><h3>Sample-accurate clock</h3><p>Locks the PipeWire quantum to the host's negotiated buffer with <code>PW_KEY_NODE_FORCE_QUANTUM</code> for tight, glitch-free timing.</p></div>
-        <div class="card"><h3>Qt6 settings panel</h3><p>A native <code>pipeasio-settings</code> app: channels, buffer size, device routing, plus a live Monitor tab with quantum, rate, xruns, and a DSP-load graph.</p></div>
+        <div class="card"><h3>Qt6 settings panel</h3><p>A native <code>pipeasio-settings</code> app: channels, buffer size, device routing, plus a live Monitor tab showing the connected input/output devices, quantum, rate, xruns and a DSP-load graph.</p></div>
         <div class="card"><h3>Bluetooth friendly</h3><p>A follow-device-clock mode lets the target device drive the cycle, which Bluetooth sinks require since their clock is the radio link.</p></div>
         <div class="card"><h3>Live config reload</h3><p>The driver re-reads its INI while running, so saving in the panel applies within about a second. No reselecting the driver or restarting the host.</p></div>
       </div>
@@ -438,7 +439,7 @@ sudo cmake --install build --prefix /usr</pre>
   <section id="faq">
     <div class="wrap reveal">
       <h2>Questions and troubleshooting</h2>
-      <p class="note" style="margin-bottom: 26px">PipeASIO is at <b>1.0.0</b>, verified with FL Studio under Proton-CachyOS and with the <a href="https://forum.vb-audio.com/viewtopic.php?p=4259#p4259">VB-Audio ASIO Test</a> utility (64-bit). Other ASIO hosts (Reaper, Ableton Live) should work but are not yet confirmed. Reports are very welcome.</p>
+      <p class="note" style="margin-bottom: 26px">PipeASIO is at <b>1.2.0</b>, verified with FL Studio under Proton-CachyOS and with the <a href="https://forum.vb-audio.com/viewtopic.php?p=4259#p4259">VB-Audio ASIO Test</a> utility (64-bit). Other ASIO hosts (Reaper, Ableton Live) should work but are not yet confirmed. Reports are very welcome.</p>
       <div class="faq">
         <details>
           <summary>No sound, or the driver does not load under Proton?</summary>
@@ -476,6 +477,7 @@ sudo cmake --install build --prefix /usr</pre>
       <a href="https://github.com/M0n7y5/pipeasio#readme">README</a>
       <a href="https://github.com/M0n7y5/pipeasio/blob/master/COPYING">License</a>
       <a href="https://pipewire.org">PipeWire</a>
+      <a href="https://ko-fi.com/m0n7y5">Support</a>
     </div>
   </div>
 </footer>
