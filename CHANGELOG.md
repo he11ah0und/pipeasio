@@ -60,6 +60,14 @@ follow [Semantic Versioning](https://semver.org/).
   the out-token (like `wow64_port_by_name` already did); our input/output ports
   resolve and link to the selected source/sink. Streaming was unaffected (it
   runs unix-side), so the regression only showed as silent autoconnect.
+- 32-bit (WoW64) live config reload was always disabled. The watcher resolved
+  the INI path with the PE-side `pipeasio_config_path()`, whose `getenv()`
+  cannot see `$XDG_CONFIG_HOME`/`$HOME` in the Windows environment under Wine,
+  so it logged "cannot resolve config path" and returned before reaching the
+  unixlib fingerprint poll it already carried. It now skips the PE-side lookup
+  in the WoW64 build and detects edits through
+  `pipeasio_wow64_config_fingerprint()`, so saving the panel re-applies live in
+  32-bit hosts too.
 
 ## [1.1.0] - 2026-06-25
 

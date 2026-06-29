@@ -441,12 +441,20 @@ config_watch_proc(LPVOID arg)
     LONG                   last_reset_quantum = 0;
     struct pipeasio_config last_cfg;
 
+#ifndef PIPEASIO_WOW64_PE
     if (!pipeasio_config_path(path, sizeof path))
     {
         WARN("config watcher: cannot resolve config path, live reload disabled\n");
         return 0;
     }
     TRACE("config watcher: watching %s\n", path);
+#else
+    /* PE-side getenv() cannot see $XDG_CONFIG_HOME/$HOME; the unixlib owns the
+     * real path and change detection runs through
+     * pipeasio_wow64_config_fingerprint(). Keep a label for traces and proceed. */
+    lstrcpynA(path, "config.ini (unixlib)", sizeof path);
+    TRACE("config watcher: watching config.ini via unixlib fingerprint\n");
+#endif
 
 #ifndef PIPEASIO_WOW64_PE
     if (stat(path, &st) == 0)
