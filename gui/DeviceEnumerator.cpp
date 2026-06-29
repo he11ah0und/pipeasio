@@ -131,20 +131,21 @@ prettyBtCodec(const QString &codec)
     return names.value(codec.toLower(), codec.toUpper());
 }
 
-/* "Name - codec / rate / channels+format / state", with trailing attributes
- * dropped when the graph does not expose them (a suspended device has no
- * negotiated Format, a non-Bluetooth device no codec). `info` is the node's
- * pw-dump "info" object. */
-static QString
-describePeer(const QJsonObject &info)
+/* Split a peer node into a display `*name` and a `*detail` line - codec (BT
+ * only) / negotiated rate / channels+format / state - dropping attributes the
+ * graph does not expose (a suspended device has no negotiated Format). `info`
+ * is the node's pw-dump "info" object. */
+static void
+describePeer(const QJsonObject &info, QString *name, QString *detail)
 {
     const QJsonObject props = info.value(QStringLiteral("props")).toObject();
 
-    QString name = props.value(QStringLiteral("node.description")).toString();
-    if (name.isEmpty())
-        name = props.value(QStringLiteral("node.nick")).toString();
-    if (name.isEmpty())
-        name = props.value(QStringLiteral("node.name")).toString();
+    QString n = props.value(QStringLiteral("node.description")).toString();
+    if (n.isEmpty())
+        n = props.value(QStringLiteral("node.nick")).toString();
+    if (n.isEmpty())
+        n = props.value(QStringLiteral("node.name")).toString();
+    *name = n;
 
     QStringList attrs;
 
@@ -188,9 +189,7 @@ describePeer(const QJsonObject &info)
     if (!state.isEmpty())
         attrs << state;
 
-    if (attrs.isEmpty())
-        return name;
-    return name + QStringLiteral(" \u2014 ") + attrs.join(QStringLiteral(" \u00b7 "));
+    *detail = attrs.join(QStringLiteral(" \u00b7 "));
 }
 
 Connections
@@ -257,14 +256,29 @@ resolveConnections(const QByteArray &json)
             inIds.append(outNode);
     }
 
-    QStringList outs, ins;
-    for (int id : outIds)
-        outs << describePeer(nodeInfo.value(id));
-    for (int id : inIds)
-        ins << describePeer(nodeInfo.value(id));
-
-    conn.output = outs.join(QStringLiteral(", "));
-    conn.input  = ins.join(QStringLiteral(", "));
+    /* One peer per side is the norm (our N ports fan into a single device); show
+     * its name and detail separately so the UI can stack them. Several distinct
+     * peers (manual patching) collapse to a names-only list, no detail. */
+    const auto fill = [&](const QList<int> &ids, QString *name, QString *detail)
+    {
+        if (ids.isEmpty())
+            return;
+        if (ids.size() == 1)
+        {
+            describePeer(nodeInfo.value(ids.first()), name, detail);
+            return;
+        }
+        QStringList names;
+        for (int id : ids)
+        {
+            QString n, d;
+            describePeer(nodeInfo.value(id), &n, &d);
+            names << n;
+        }
+        *name = names.join(QStringLiteral(", "));
+    };
+    fill(outIds, &conn.output, &conn.outputDetail);
+    fill(inIds, &conn.input, &conn.inputDetail);
     return conn;
 }
 

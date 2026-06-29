@@ -207,6 +207,8 @@ PipeWireMonitor::onTopFinished()
         NodeStats out    = st;
         out.inputDevice  = m_connInput;
         out.outputDevice = m_connOutput;
+        out.inputDeviceDetail  = m_connInputDetail;
+        out.outputDeviceDetail = m_connOutputDetail;
         emit updated(out);
         m_busy = false;
         return;
@@ -240,13 +242,17 @@ PipeWireMonitor::onDumpFinished()
     }
 
     const DeviceEnumerator::Connections conn = DeviceEnumerator::resolveConnections(dump);
-    m_connInput      = conn.input;
-    m_connOutput     = conn.output;
-    m_pollsSinceDump = 0;
+    m_connInput        = conn.input;
+    m_connInputDetail  = conn.inputDetail;
+    m_connOutput       = conn.output;
+    m_connOutputDetail = conn.outputDetail;
+    m_pollsSinceDump   = 0;
 
-    NodeStats st    = parsePwTop(m_lastTop, m_target);
-    st.inputDevice  = m_connInput;
-    st.outputDevice = m_connOutput;
+    NodeStats st          = parsePwTop(m_lastTop, m_target);
+    st.inputDevice        = m_connInput;
+    st.inputDeviceDetail  = m_connInputDetail;
+    st.outputDevice       = m_connOutput;
+    st.outputDeviceDetail = m_connOutputDetail;
     emit updated(st);
     m_busy = false;
 }

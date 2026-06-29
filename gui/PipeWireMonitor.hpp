@@ -40,6 +40,8 @@ struct NodeStats
     QString state;
     QString inputDevice;  /* source feeding our inputs (Monitor tab) */
     QString outputDevice; /* sink our outputs feed (Monitor tab) */
+    QString inputDeviceDetail;  /* codec/format/state line for the input */
+    QString outputDeviceDetail; /* codec/format/state line for the output */
 };
 
 /* Parse `pw-top -b -n 1` output, returning stats for the first data row whose
@@ -79,5 +81,7 @@ class PipeWireMonitor : public QObject
     QByteArray m_lastTop;        /* last pw-top output, re-parsed after discovery */
     QString    m_connInput;             /* last-resolved Monitor connections */
     QString    m_connOutput;
+    QString    m_connInputDetail;  /* second-line detail for the Monitor rows */
+    QString    m_connOutputDetail;
     int        m_pollsSinceDump = 1000; /* force a connection dump on first poll */
 };

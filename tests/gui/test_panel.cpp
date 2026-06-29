@@ -237,14 +237,14 @@ test_resolve_connections()
               "{\"link.output.node\":53,\"link.input.node\":61}}}\n"
               "]\n";
     const DeviceEnumerator::Connections c = DeviceEnumerator::resolveConnections(json);
-    CHECK(c.output.contains(QStringLiteral("FiiO UTWS5")));
-    CHECK(c.output.contains(QStringLiteral("aptX")));
-    CHECK(c.output.contains(QStringLiteral("44100 Hz")));
-    CHECK(c.output.contains(QStringLiteral("2 ch")));
-    CHECK(c.output.contains(QStringLiteral("running")));
-    CHECK(c.input.contains(QStringLiteral("USB Mic")));
-    CHECK(c.input.contains(QStringLiteral("48000 Hz")));
-    CHECK(c.input.contains(QStringLiteral("1 ch")));
+    CHECK(c.output == QStringLiteral("FiiO UTWS5"));
+    CHECK(c.outputDetail.contains(QStringLiteral("aptX")));
+    CHECK(c.outputDetail.contains(QStringLiteral("44100 Hz")));
+    CHECK(c.outputDetail.contains(QStringLiteral("2 ch S24LE")));
+    CHECK(c.outputDetail.contains(QStringLiteral("running")));
+    CHECK(c.input == QStringLiteral("USB Mic"));
+    CHECK(c.inputDetail.contains(QStringLiteral("48000 Hz")));
+    CHECK(c.inputDetail.contains(QStringLiteral("1 ch S24LE")));
 
     /* No pipeasio-marked node present -> both sides empty. */
     const QByteArray none = "[ {\"id\":89,\"type\":\"PipeWire:Interface:Node\",\"info\":"

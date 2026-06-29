@@ -225,11 +225,13 @@ SettingsDialog::buildMonitorTab()
            QStringLiteral("PipeWire node state: R running, I idle, S suspended, E error."));
 
     m_monOutput = new QLabel(QStringLiteral("—"), page);
+    m_monOutput->setWordWrap(true);
     addRow(QStringLiteral("Output device"), m_monOutput,
            QStringLiteral("The sink the driver's output ports currently feed, with its live "
                           "format and state (and Bluetooth codec when applicable)."));
 
     m_monInput = new QLabel(QStringLiteral("—"), page);
+    m_monInput->setWordWrap(true);
     addRow(QStringLiteral("Input device"), m_monInput,
            QStringLiteral("The source currently feeding the driver's input ports, with its "
                           "live format and state (and Bluetooth codec when applicable)."));
@@ -331,12 +333,23 @@ SettingsDialog::onApply()
     Config::save(cfg);
 }
 
+/* Device name on top, its attributes on a smaller muted line below. */
+static QString
+formatDevice(const QString &name, const QString &detail)
+{
+    if (name.isEmpty())
+        return QStringLiteral("—");
+    if (detail.isEmpty())
+        return name.toHtmlEscaped();
+    return QStringLiteral("%1<br><span style=\"color:gray; font-size:small;\">%2</span>")
+            .arg(name.toHtmlEscaped(), detail.toHtmlEscaped());
+}
+
 void
 SettingsDialog::onMonitorUpdated(const NodeStats &stats)
 {
-    const QString dash = QStringLiteral("—");
-    m_monOutput->setText(stats.outputDevice.isEmpty() ? dash : stats.outputDevice);
-    m_monInput->setText(stats.inputDevice.isEmpty() ? dash : stats.inputDevice);
+    m_monOutput->setText(formatDevice(stats.outputDevice, stats.outputDeviceDetail));
+    m_monInput->setText(formatDevice(stats.inputDevice, stats.inputDeviceDetail));
 
     if (!stats.found)
     {
