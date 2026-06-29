@@ -25,6 +25,8 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QProcess>
+#include <QHash>
+#include <QStringList>
 
 namespace DeviceEnumerator
 {
@@ -108,6 +110,89 @@ findOwnNode(const QByteArray &json)
             return props.value(QStringLiteral("node.name")).toString();
     }
     return {};
+}
+
+Connections
+resolveConnections(const QByteArray &json)
+{
+    Connections conn;
+
+    QJsonParseError     err{};
+    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+    if (err.error != QJsonParseError::NoError || !doc.isArray())
+        return conn;
+
+    const QJsonArray arr = doc.array();
+
+    /* Pass 1: map every node id -> display name, and find our own node id via
+     * the driver's "pipeasio.node" marker (set regardless of node_name). */
+    QHash<int, QString> nodeDesc;
+    int                 ownId = -1;
+    for (const QJsonValue &v : arr)
+    {
+        if (!v.isObject())
+            continue;
+        const QJsonObject obj = v.toObject();
+        if (obj.value(QStringLiteral("type")).toString()
+            != QLatin1String("PipeWire:Interface:Node"))
+            continue;
+        const int id = obj.value(QStringLiteral("id")).toInt(-1);
+        if (id < 0)
+            continue;
+        const QJsonObject props = obj.value(QStringLiteral("info"))
+                                          .toObject()
+                                          .value(QStringLiteral("props"))
+                                          .toObject();
+        QString d = props.value(QStringLiteral("node.description")).toString();
+        if (d.isEmpty())
+            d = props.value(QStringLiteral("node.nick")).toString();
+        if (d.isEmpty())
+            d = props.value(QStringLiteral("node.name")).toString();
+        nodeDesc.insert(id, d);
+
+        const QJsonValue marker = props.value(QStringLiteral("pipeasio.node"));
+        if (marker.toString() == QLatin1String("1") || marker.toInt() == 1)
+            ownId = id;
+    }
+    if (ownId < 0)
+        return conn;
+
+    /* Pass 2: links touching our node. A link FROM our node (output.node ==
+     * ours) lands on a sink we play to; a link TO our node (input.node == ours)
+     * comes from a source we capture from. Distinct peers, link order kept. */
+    QStringList outs, ins;
+    for (const QJsonValue &v : arr)
+    {
+        if (!v.isObject())
+            continue;
+        const QJsonObject obj = v.toObject();
+        if (obj.value(QStringLiteral("type")).toString()
+            != QLatin1String("PipeWire:Interface:Link"))
+            continue;
+        const QJsonObject props = obj.value(QStringLiteral("info"))
+                                          .toObject()
+                                          .value(QStringLiteral("props"))
+                                          .toObject();
+        const int outNode = props.value(QStringLiteral("link.output.node")).toInt(-1);
+        const int inNode  = props.value(QStringLiteral("link.input.node")).toInt(-1);
+
+        if (outNode == ownId && nodeDesc.contains(inNode))
+        {
+            const QString d = nodeDesc.value(inNode);
+            if (!d.isEmpty() && !outs.contains(d))
+                outs.append(d);
+        }
+        if (inNode == ownId && nodeDesc.contains(outNode))
+        {
+            const QString d = nodeDesc.value(outNode);
+            if (!d.isEmpty() && !ins.contains(d))
+                ins.append(d);
+        }
+    }
+
+    conn.output = outs.join(QStringLiteral(", "));
+    conn.input  = ins.join(QStringLiteral(", "));
+    return conn;
 }
 
 QByteArray

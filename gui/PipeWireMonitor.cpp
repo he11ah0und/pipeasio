@@ -31,6 +31,10 @@
 namespace
 {
 
+/* pw-dump cadence: refresh the connected sink/source every Nth poll. pw-top
+ * runs every poll for fast stats; graph topology changes rarely. */
+constexpr int kDumpEvery = 5;
+
 int
 intOrZero(const QString &tok)
 {
@@ -191,13 +195,19 @@ PipeWireMonitor::onTopFinished()
     m_proc = nullptr;
 
     const NodeStats st = parsePwTop(m_lastTop, m_target);
-    /* The host names our node after its own executable, so when no explicit
-     * node_name is configured we resolve it from the "pipeasio.node" marker the
-     * driver stamps on the filter - refreshed whenever the current target isn't
-     * present (e.g. the host (re)started since we last looked). */
-    if (st.found || !m_autoDiscover)
+    /* Dump the graph when we still need to discover our node (the host names it
+     * after its own exe; we resolve it via the "pipeasio.node" marker) OR when a
+     * connection refresh is due - the same pw-dump yields the sink/source our
+     * ports are linked to. Between dumps, reuse the cached connection strings. */
+    ++m_pollsSinceDump;
+    const bool needDiscover = m_autoDiscover && !st.found;
+    const bool refreshConn  = m_pollsSinceDump >= kDumpEvery;
+    if (!needDiscover && !refreshConn)
     {
-        emit updated(st);
+        NodeStats out    = st;
+        out.inputDevice  = m_connInput;
+        out.outputDevice = m_connOutput;
+        emit updated(out);
         m_busy = false;
         return;
     }
@@ -222,9 +232,21 @@ PipeWireMonitor::onDumpFinished()
     m_proc->deleteLater();
     m_proc = nullptr;
 
-    const QString name = DeviceEnumerator::findOwnNode(dump);
-    if (!name.isEmpty())
-        m_target = name;
-    emit updated(parsePwTop(m_lastTop, m_target));
+    if (m_autoDiscover)
+    {
+        const QString name = DeviceEnumerator::findOwnNode(dump);
+        if (!name.isEmpty())
+            m_target = name;
+    }
+
+    const DeviceEnumerator::Connections conn = DeviceEnumerator::resolveConnections(dump);
+    m_connInput      = conn.input;
+    m_connOutput     = conn.output;
+    m_pollsSinceDump = 0;
+
+    NodeStats st    = parsePwTop(m_lastTop, m_target);
+    st.inputDevice  = m_connInput;
+    st.outputDevice = m_connOutput;
+    emit updated(st);
     m_busy = false;
 }

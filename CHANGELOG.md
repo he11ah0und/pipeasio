@@ -6,6 +6,13 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The Monitor tab now shows the **Output device** and **Input device** the
+  driver's ports are currently connected to - the live sink and source resolved
+  from the PipeWire graph - so it is obvious which hardware the driver is
+  feeding, especially when autoconnect or "follow default" picks the device.
+
 ### Changed
 
 - Live config reload now diffs the INI before resetting. Saving the settings

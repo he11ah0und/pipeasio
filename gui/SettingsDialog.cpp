@@ -200,6 +200,16 @@ SettingsDialog::buildMonitorTab()
         form->addRow(lbl, field);
     };
 
+    m_monOutput = new QLabel(QStringLiteral("—"), page);
+    addRow(QStringLiteral("Output device"), m_monOutput,
+           QStringLiteral("The sink (speakers/headphones) the driver's output ports are "
+                          "currently connected to."));
+
+    m_monInput = new QLabel(QStringLiteral("—"), page);
+    addRow(QStringLiteral("Input device"), m_monInput,
+           QStringLiteral("The source (microphone/loopback) currently feeding the driver's "
+                          "input ports."));
+
     m_monQuantum = new QLabel(QStringLiteral("waiting for audio..."), page);
     addRow(QStringLiteral("Buffer / quantum"), m_monQuantum,
            QStringLiteral("PipeWire processing block size (frames per cycle) the driver's "
@@ -324,6 +334,10 @@ SettingsDialog::onApply()
 void
 SettingsDialog::onMonitorUpdated(const NodeStats &stats)
 {
+    const QString dash = QStringLiteral("—");
+    m_monOutput->setText(stats.outputDevice.isEmpty() ? dash : stats.outputDevice);
+    m_monInput->setText(stats.inputDevice.isEmpty() ? dash : stats.inputDevice);
+
     if (!stats.found)
     {
         const QString waiting = QStringLiteral("waiting for audio...");

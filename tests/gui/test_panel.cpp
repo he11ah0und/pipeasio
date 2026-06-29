@@ -212,6 +212,39 @@ test_find_own_node()
     CHECK(DeviceEnumerator::findOwnNode(none).isEmpty());
 }
 
+static void
+test_resolve_connections()
+{
+    /* Our filter node (61, marked) plays to a sink (89) and captures from a
+     * source (53). Links reference node ids directly, so the fixture needs no
+     * Port objects. */
+    const QByteArray json
+            = "[\n"
+              "  {\"id\":89,\"type\":\"PipeWire:Interface:Node\",\"info\":{\"props\":"
+              "{\"media.class\":\"Audio/Sink\",\"node.name\":\"bluez_output.x\","
+              "\"node.description\":\"FiiO UTWS5\"}}},\n"
+              "  {\"id\":53,\"type\":\"PipeWire:Interface:Node\",\"info\":{\"props\":"
+              "{\"media.class\":\"Audio/Source\",\"node.name\":\"alsa_input.mic\","
+              "\"node.description\":\"USB Mic\"}}},\n"
+              "  {\"id\":61,\"type\":\"PipeWire:Interface:Node\",\"info\":{\"props\":"
+              "{\"node.name\":\"FL64\",\"pipeasio.node\":1}}},\n"
+              "  {\"id\":201,\"type\":\"PipeWire:Interface:Link\",\"info\":{\"props\":"
+              "{\"link.output.node\":61,\"link.input.node\":89}}},\n"
+              "  {\"id\":202,\"type\":\"PipeWire:Interface:Link\",\"info\":{\"props\":"
+              "{\"link.output.node\":53,\"link.input.node\":61}}}\n"
+              "]\n";
+    const DeviceEnumerator::Connections c = DeviceEnumerator::resolveConnections(json);
+    CHECK(c.output == QStringLiteral("FiiO UTWS5"));
+    CHECK(c.input == QStringLiteral("USB Mic"));
+
+    /* No pipeasio-marked node present -> both sides empty. */
+    const QByteArray none = "[ {\"id\":89,\"type\":\"PipeWire:Interface:Node\",\"info\":"
+                            "{\"props\":{\"media.class\":\"Audio/Sink\",\"node.name\":\"x\"}}} ]";
+    const DeviceEnumerator::Connections e = DeviceEnumerator::resolveConnections(none);
+    CHECK(e.output.isEmpty());
+    CHECK(e.input.isEmpty());
+}
+
 int
 main(int argc, char **argv)
 {
@@ -223,6 +256,7 @@ main(int argc, char **argv)
     test_parse_pwdump();
     test_parse_pwtop();
     test_find_own_node();
+    test_resolve_connections();
 
     std::fprintf(stderr, "[%s] %d checks, %d failed\n", g_fail ? "FAIL" : "PASS", g_total, g_fail);
     return g_fail ? 1 : 0;

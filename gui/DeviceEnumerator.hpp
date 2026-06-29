@@ -44,6 +44,16 @@ QList<Device> parsePwDump(const QByteArray &json);
  * or "" if no such node is present.  Pure. */
 QString findOwnNode(const QByteArray &json);
 
+/* The sink our outputs feed and the source feeding our inputs, resolved from
+ * pw-dump links to our own filter node (tagged "pipeasio.node"="1"). Either
+ * field is empty when nothing is connected on that side. Pure. */
+struct Connections
+{
+    QString output; /* sink device description(s) our outputs connect to */
+    QString input;  /* source device description(s) feeding our inputs */
+};
+Connections resolveConnections(const QByteArray &json);
+
 /* Run `pw-dump` and return its stdout (empty on failure). */
 QByteArray runPwDump();
 
