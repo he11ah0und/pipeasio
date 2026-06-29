@@ -433,6 +433,14 @@ audio_port_get_buffer(audio_port_t *port, audio_nframes_t nframes)
     return NULL;
 }
 
+audio_nframes_t
+audio_port_buffer_avail_frames(const audio_port_t *port)
+{
+    /* Process callbacks run in the unixlib. */
+    (void)port;
+    return 0;
+}
+
 const char *
 audio_port_name(const audio_port_t *port)
 {

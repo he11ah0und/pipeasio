@@ -46,6 +46,12 @@ follow [Semantic Versioning](https://semver.org/).
   the host period (graph quantum below the configured buffer size). The input
   gather is now clamped to the mapped buffer and the tail zero-filled, mirroring
   the existing output-side clamp; both the 64-bit and WoW64 paths are fixed.
+- The experimental 32-bit WoW64 PE front end no longer fails to link. The input
+  clamp above calls `audio_port_buffer_avail_frames`, which is unix-side only; the
+  PE half (which links the WoW64 proxy instead of `audio.c`) now carries a matching
+  stub, since that gather actually runs unix-side. `-DBUILD_WOW64_32=ON` builds
+  again, with 32-bit load + streaming re-verified through `asio_probe32` and
+  VB-Audio's VBASIOTest32.
 
 ## [1.1.0] - 2026-06-25
 
