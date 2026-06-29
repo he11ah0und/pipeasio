@@ -36,6 +36,12 @@ drivers.
 > [!NOTE]
 > PipeASIO is at **1.2.0**. It is verified with FL Studio under Proton-CachyOS and with the [VB-Audio ASIO Test](https://forum.vb-audio.com/viewtopic.php?p=4259#p4259) utility (64-bit). Other ASIO hosts such as Reaper and Ableton Live should work but are not yet confirmed. x86_64, with experimental opt-in 32-bit (WoW64) support. Bug reports are very welcome on the [issue tracker](https://github.com/M0n7y5/pipeasio/issues).
 
+## Support
+
+If PipeASIO is useful to you, you can support its development on Ko-fi:
+
+[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/m0n7y5)
+
 ## Quick start
 
 On Arch Linux and derivatives (CachyOS, EndeavourOS, Manjaro), install
@@ -440,12 +446,6 @@ as part of the package.
 ## Contributing
 
 Issues and pull requests are welcome on [GitHub](https://github.com/M0n7y5/pipeasio). Run `clang-format` (the config is in-tree) before submitting, and keep changes x86_64 and C11.
-
-## Support
-
-If PipeASIO is useful to you, you can support its development on Ko-fi:
-
-[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/m0n7y5)
 
 ## Acknowledgements
 
