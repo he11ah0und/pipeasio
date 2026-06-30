@@ -228,26 +228,26 @@ typedef struct IPipeASIOImpl
     HWND sys_ref;
 
     /* Host stuff */
-    LONG       host_active_inputs;
-    LONG       host_active_outputs;
-    BOOL       host_buffer_index;
+    LONG host_active_inputs;
+    LONG host_active_outputs;
+    BOOL host_buffer_index;
     Callbacks *_Atomic host_callbacks;
     /* Live-config watcher: polls config.ini, asks the host to reset on change */
-    HANDLE          config_watch_thread;
-    HANDLE          config_watch_stop;
-    DWORD           config_watch_tid;
+    HANDLE                 config_watch_thread;
+    HANDLE                 config_watch_stop;
+    DWORD                  config_watch_tid;
     CRITICAL_SECTION       config_lock;      /* guards staged_cfg */
     struct pipeasio_config staged_cfg;       /* watcher -> apply handoff */
     _Atomic bool           config_pending;   /* staged_cfg has a fresh reload */
     _Atomic LONG           follower_quantum; /* last observed device quantum */
-    LONG            host_current_buffersize;
-    _Atomic INT     host_driver_state;
-    w_int64_t       host_num_samples;
-    double          host_sample_rate;
-    TimeInformation host_time;
-    BOOL            host_time_info_mode;
-    w_int64_t       host_time_stamp;
-    LONG            host_version;
+    LONG                   host_current_buffersize;
+    _Atomic INT            host_driver_state;
+    w_int64_t              host_num_samples;
+    double                 host_sample_rate;
+    TimeInformation        host_time;
+    BOOL                   host_time_info_mode;
+    w_int64_t              host_time_stamp;
+    LONG                   host_version;
 
     /* PipeASIO configuration options */
     int  pipeasio_number_inputs;
@@ -515,14 +515,13 @@ config_watch_proc(LPVOID arg)
 #else
             pipeasio_config_load(&newcfg);
 #endif
-            bool live_changed =
-                newcfg.buffer_size != last_cfg.buffer_size
-                || newcfg.fixed_buffer_size != last_cfg.fixed_buffer_size
-                || newcfg.sample_rate != last_cfg.sample_rate
-                || newcfg.follow_device_clock != last_cfg.follow_device_clock
-                || newcfg.auto_connect != last_cfg.auto_connect
-                || strcmp(newcfg.output_device, last_cfg.output_device) != 0
-                || strcmp(newcfg.input_device, last_cfg.input_device) != 0;
+            bool live_changed   = newcfg.buffer_size != last_cfg.buffer_size
+                                  || newcfg.fixed_buffer_size != last_cfg.fixed_buffer_size
+                                  || newcfg.sample_rate != last_cfg.sample_rate
+                                  || newcfg.follow_device_clock != last_cfg.follow_device_clock
+                                  || newcfg.auto_connect != last_cfg.auto_connect
+                                  || strcmp(newcfg.output_device, last_cfg.output_device) != 0
+                                  || strcmp(newcfg.input_device, last_cfg.input_device) != 0;
             bool reinit_changed = newcfg.inputs != last_cfg.inputs
                                   || newcfg.outputs != last_cfg.outputs
                                   || strcmp(newcfg.node_name, last_cfg.node_name) != 0;
@@ -944,7 +943,7 @@ GetBufferSize(LPPIPEASIO iface, LONG *minSize, LONG *maxSize, LONG *preferredSiz
     }
     if (fixed || follow)
     {
-        LONG q = atomic_load_explicit(&This->follower_quantum, memory_order_relaxed);
+        LONG q   = atomic_load_explicit(&This->follower_quantum, memory_order_relaxed);
         *minSize = *maxSize = *preferredSize = (follow && q) ? q : pref;
         *granularity                         = 0;
         TRACE("Buffersize fixed at %d (pending=%d)\n", (int)*preferredSize, (int)pending);
@@ -1136,8 +1135,9 @@ apply_pending_config(IPipeASIOImpl *This)
     if (This->pipeasio_fixed_buffersize || This->pipeasio_follow_device_clock)
     {
         LONG q = atomic_load_explicit(&This->follower_quantum, memory_order_relaxed);
-        This->host_current_buffersize =
-            (This->pipeasio_follow_device_clock && q) ? q : This->pipeasio_preferred_buffersize;
+        This->host_current_buffersize = (This->pipeasio_follow_device_clock && q)
+                                                ? q
+                                                : This->pipeasio_preferred_buffersize;
     }
 }
 
@@ -1405,7 +1405,8 @@ CreateBuffers(LPPIPEASIO iface, BufferInformation *bufferInfo, LONG numChannels,
     This->config_watch_stop = CreateEvent(NULL, TRUE, FALSE, NULL);
     if (This->config_watch_stop)
     {
-        This->config_watch_thread = CreateThread(NULL, 0, config_watch_proc, This, 0, &This->config_watch_tid);
+        This->config_watch_thread
+                = CreateThread(NULL, 0, config_watch_proc, This, 0, &This->config_watch_tid);
         if (!This->config_watch_thread)
         {
             CloseHandle(This->config_watch_stop);
@@ -1914,7 +1915,7 @@ PipeASIOCreateInstance(REFIID riid, LPVOID *ppobj)
 
     pobj->lpVtbl = &PipeASIO_Vtbl;
     InitializeCriticalSection(&pobj->config_lock);
-    pobj->ref    = 1;
+    pobj->ref = 1;
     TRACE("pobj = %p\n", pobj);
     *ppobj = pobj;
     return S_OK;

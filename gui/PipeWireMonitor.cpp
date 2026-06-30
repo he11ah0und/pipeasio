@@ -204,9 +204,9 @@ PipeWireMonitor::onTopFinished()
     const bool refreshConn  = m_pollsSinceDump >= kDumpEvery;
     if (!needDiscover && !refreshConn)
     {
-        NodeStats out    = st;
-        out.inputDevice  = m_connInput;
-        out.outputDevice = m_connOutput;
+        NodeStats out          = st;
+        out.inputDevice        = m_connInput;
+        out.outputDevice       = m_connOutput;
         out.inputDeviceDetail  = m_connInputDetail;
         out.outputDeviceDetail = m_connOutputDetail;
         emit updated(out);
@@ -242,11 +242,11 @@ PipeWireMonitor::onDumpFinished()
     }
 
     const DeviceEnumerator::Connections conn = DeviceEnumerator::resolveConnections(dump);
-    m_connInput        = conn.input;
-    m_connInputDetail  = conn.inputDetail;
-    m_connOutput       = conn.output;
-    m_connOutputDetail = conn.outputDetail;
-    m_pollsSinceDump   = 0;
+    m_connInput                              = conn.input;
+    m_connInputDetail                        = conn.inputDetail;
+    m_connOutput                             = conn.output;
+    m_connOutputDetail                       = conn.outputDetail;
+    m_pollsSinceDump                         = 0;
 
     NodeStats st          = parsePwTop(m_lastTop, m_target);
     st.inputDevice        = m_connInput;

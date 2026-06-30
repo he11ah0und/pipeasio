@@ -108,9 +108,9 @@ void         *audio_port_get_buffer(audio_port_t *port, audio_nframes_t nframes)
  * 0 when no buffer is mapped this cycle.  Lets the RT copy clamp against a
  * daemon buffer smaller than the host period (quantum < buffer_size). */
 audio_nframes_t audio_port_buffer_avail_frames(const audio_port_t *port);
-const char   *audio_port_name(const audio_port_t *port);
-const char   *audio_port_type(const audio_port_t *port);
-audio_port_t *audio_port_by_name(audio_client_t *client, const char *port_name);
+const char     *audio_port_name(const audio_port_t *port);
+const char     *audio_port_type(const audio_port_t *port);
+audio_port_t   *audio_port_by_name(audio_client_t *client, const char *port_name);
 /* The returned NULL-terminated array and its name strings are duplicated
  * out of the discovered cache; free both with audio_free_ports (not audio_free). */
 const char **audio_get_ports(audio_client_t *client, const char *port_name_pattern,

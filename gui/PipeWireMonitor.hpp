@@ -38,8 +38,8 @@ struct NodeStats
     double  dspLoad = 0.0;
     long    xruns   = 0;
     QString state;
-    QString inputDevice;  /* source feeding our inputs (Monitor tab) */
-    QString outputDevice; /* sink our outputs feed (Monitor tab) */
+    QString inputDevice;        /* source feeding our inputs (Monitor tab) */
+    QString outputDevice;       /* sink our outputs feed (Monitor tab) */
     QString inputDeviceDetail;  /* codec/format/state line for the input */
     QString outputDeviceDetail; /* codec/format/state line for the output */
 };
@@ -79,9 +79,9 @@ class PipeWireMonitor : public QObject
     QProcess  *m_proc = nullptr; /* in-flight child (pw-top or pw-dump) */
     bool       m_busy = false;   /* a poll cycle is in flight */
     QByteArray m_lastTop;        /* last pw-top output, re-parsed after discovery */
-    QString    m_connInput;             /* last-resolved Monitor connections */
+    QString    m_connInput;      /* last-resolved Monitor connections */
     QString    m_connOutput;
-    QString    m_connInputDetail;  /* second-line detail for the Monitor rows */
+    QString    m_connInputDetail; /* second-line detail for the Monitor rows */
     QString    m_connOutputDetail;
     int        m_pollsSinceDump = 1000; /* force a connection dump on first poll */
 };

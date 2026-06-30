@@ -152,25 +152,24 @@ describePeer(const QJsonObject &info, QString *name, QString *detail)
     const QString codec = props.value(QStringLiteral("api.bluez5.codec")).toString();
     if (!codec.isEmpty())
         attrs << prettyBtCodec(codec);
-    else if (props.value(QStringLiteral("device.api")).toString()
-             == QLatin1String("bluez5"))
+    else if (props.value(QStringLiteral("device.api")).toString() == QLatin1String("bluez5"))
         attrs << QStringLiteral("Bluetooth");
 
     /* Negotiated format (rate/channels/sample format); present only while the
      * device is active. */
-    const QJsonArray fmt = info.value(QStringLiteral("params"))
-                                   .toObject()
-                                   .value(QStringLiteral("Format"))
-                                   .toArray();
-    int     rate     = 0;
-    int     channels = 0;
-    QString sampleFmt;
+    const QJsonArray fmt      = info.value(QStringLiteral("params"))
+                                        .toObject()
+                                        .value(QStringLiteral("Format"))
+                                        .toArray();
+    int              rate     = 0;
+    int              channels = 0;
+    QString          sampleFmt;
     if (!fmt.isEmpty())
     {
         const QJsonObject f = fmt.first().toObject();
-        rate      = f.value(QStringLiteral("rate")).toInt(0);
-        channels  = f.value(QStringLiteral("channels")).toInt(0);
-        sampleFmt = f.value(QStringLiteral("format")).toString();
+        rate                = f.value(QStringLiteral("rate")).toInt(0);
+        channels            = f.value(QStringLiteral("channels")).toInt(0);
+        sampleFmt           = f.value(QStringLiteral("format")).toString();
     }
     if (channels == 0)
         channels = props.value(QStringLiteral("audio.channels")).toInt(0);
@@ -243,12 +242,12 @@ resolveConnections(const QByteArray &json)
         if (obj.value(QStringLiteral("type")).toString()
             != QLatin1String("PipeWire:Interface:Link"))
             continue;
-        const QJsonObject props = obj.value(QStringLiteral("info"))
-                                          .toObject()
-                                          .value(QStringLiteral("props"))
-                                          .toObject();
-        const int outNode = props.value(QStringLiteral("link.output.node")).toInt(-1);
-        const int inNode  = props.value(QStringLiteral("link.input.node")).toInt(-1);
+        const QJsonObject props   = obj.value(QStringLiteral("info"))
+                                            .toObject()
+                                            .value(QStringLiteral("props"))
+                                            .toObject();
+        const int         outNode = props.value(QStringLiteral("link.output.node")).toInt(-1);
+        const int         inNode  = props.value(QStringLiteral("link.input.node")).toInt(-1);
 
         if (outNode == ownId && nodeInfo.contains(inNode) && !outIds.contains(inNode))
             outIds.append(inNode);
