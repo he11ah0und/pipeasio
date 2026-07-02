@@ -54,7 +54,8 @@
     {
       "@type": "FAQPage",
       "mainEntity": [
-        { "@type": "Question", "name": "No sound, or the driver does not load under Proton?", "acceptedAnswer": { "@type": "Answer", "text": "Proton's container cannot see /usr/lib/wine. Install under $HOME, set WINEDLLPATH=$HOME/.local/lib/wine in your launcher's per-game environment, then register in that prefix." } },
+        { "@type": "Question", "name": "No sound, or the driver does not load under Proton?", "acceptedAnswer": { "@type": "Answer", "text": "Proton's container cannot see /usr/lib/wine. Install under $HOME and set WINEDLLPATH in the game's launch options - Steam: WINEDLLPATH=/home/<you>/.local/lib/wine %command%, Faugus: the same variable in the per-game environment field - then register in that prefix." } },
+        { "@type": "Question", "name": "A 32-bit game or host does not list PipeASIO under Proton?", "acceptedAnswer": { "@type": "Answer", "text": "Proton runs 32-bit apps through classic split WoW64 by default, which cannot load the 32-bit front end. In Steam, add PROTON_USE_WOW64=1 alongside WINEDLLPATH in the game's launch options: PROTON_USE_WOW64=1 WINEDLLPATH=/home/<you>/.local/lib/wine %command%. In Faugus, enable the WoW64 option in the game's settings. The install must also include the 32-bit half (-DBUILD_WOW64_32=ON)." } },
         { "@type": "Question", "name": "Registering fails with status c0000135?", "acceptedAnswer": { "@type": "Answer", "text": "Wine could not find the unified PE name. The install creates pipeasio.dll symlinks next to pipeasio64.dll for Wine 10+, so re-run cmake --install to create them, then register again." } },
         { "@type": "Question", "name": "Bluetooth headphones produce no sound?", "acceptedAnswer": { "@type": "Answer", "text": "Turn on follow device clock in the panel (or set PIPEASIO_FOLLOW_DEVICE_CLOCK=on). A Bluetooth sink's clock is the radio link and cannot be slaved to the host, so the driver follows it instead." } },
         { "@type": "Question", "name": "Does it conflict with WineASIO?", "acceptedAnswer": { "@type": "Answer", "text": "No. PipeASIO has its own CLSID and registry identity, so it installs side by side with WineASIO and hosts list them as separate drivers." } },
@@ -417,9 +418,14 @@ sudo cmake --install build --prefix /usr</pre>
 <pre>env WINEPREFIX=<span class="p">"$HOME/Faugus/&lt;game&gt;"</span> pipeasio-register</pre>
 
       <div class="step">4 / Proton and Steam Runtime</div>
-      <p>Proton runs Wine in a container that cannot see <code>/usr/lib/wine</code>, so install under <code>$HOME</code> (above) and point Proton's Wine at the ELF half by setting this in your launcher's per-game environment:</p>
+      <p>Proton runs Wine in a container that cannot see <code>/usr/lib/wine</code>, so install under <code>$HOME</code> (above) and point Proton's Wine at the ELF half with <code>WINEDLLPATH</code>. In Steam, add it to the game's launch options (right-click the game &gt; Properties &gt; General):</p>
+<pre>WINEDLLPATH=/home/&lt;you&gt;/.local/lib/wine %command%</pre>
+      <p>In Faugus, put it in the per-game "Launch options" environment field:</p>
 <pre>WINEDLLPATH=/home/&lt;you&gt;/.local/lib/wine</pre>
       <p class="note">Use the absolute path (Faugus does not expand <code>~</code>). Then pick <b>PipeASIO</b> as the ASIO device inside your host. The full config reference and environment overrides live in the <a href="https://github.com/M0n7y5/pipeasio#readme">README</a>.</p>
+      <p><b>32-bit games and hosts only:</b> Proton runs 32-bit apps through classic split WoW64 by default, which cannot load PipeASIO's experimental 32-bit front end. Enable Proton's <i>new WoW64</i> mode. In Steam, add <code>PROTON_USE_WOW64=1</code> alongside <code>WINEDLLPATH</code> in the game's launch options:</p>
+<pre>PROTON_USE_WOW64=1 WINEDLLPATH=/home/&lt;you&gt;/.local/lib/wine %command%</pre>
+      <p class="note">In Faugus, enable the <b>WoW64</b> option in the game's settings, or add <code>PROTON_USE_WOW64=1</code> to the same environment field as <code>WINEDLLPATH</code>. 64-bit games and hosts do not need this.</p>
 
       <div class="step">5 / Configure with the panel</div>
       <p>The same install drops a native settings app, <code>pipeasio-settings</code> (built whenever <code>qt6-base-dev</code> is present). Launch it to set channels, buffer size and device routing, and to watch the live Monitor. Saves apply within about a second, with no host restart.</p>
@@ -452,7 +458,11 @@ sudo cmake --install build --prefix /usr</pre>
       <div class="faq">
         <details>
           <summary>No sound, or the driver does not load under Proton?</summary>
-          <div class="ans">Proton's container cannot see <code>/usr/lib/wine</code>. Install under <code>$HOME</code>, set <code>WINEDLLPATH=$HOME/.local/lib/wine</code> in your launcher's per-game environment, then register in that prefix.</div>
+          <div class="ans">Proton's container cannot see <code>/usr/lib/wine</code>. Install under <code>$HOME</code> and set <code>WINEDLLPATH</code> in the game's launch options - Steam: <code>WINEDLLPATH=/home/&lt;you&gt;/.local/lib/wine %command%</code>, Faugus: the same variable in the per-game environment field - then register in that prefix.</div>
+        </details>
+        <details>
+          <summary>A 32-bit game or host does not list PipeASIO under Proton?</summary>
+          <div class="ans">Proton runs 32-bit apps through classic split WoW64 by default, which cannot load the 32-bit front end. In Steam, add <code>PROTON_USE_WOW64=1</code> alongside <code>WINEDLLPATH</code> in the game's launch options: <code>PROTON_USE_WOW64=1 WINEDLLPATH=/home/&lt;you&gt;/.local/lib/wine %command%</code>. In Faugus, enable the <b>WoW64</b> option in the game's settings. The install must also include the 32-bit half (<code>-DBUILD_WOW64_32=ON</code>).</div>
         </details>
         <details>
           <summary>Registering fails with status <code>c0000135</code>?</summary>
