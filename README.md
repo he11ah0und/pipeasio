@@ -450,8 +450,10 @@ it coexists with WineASIO: neither overrides the other.
 
 ### Testing
 
-`ctest --test-dir build` runs the Linux-native unit and contract tests. Two
-Wine-based tools exercise the real driver against a live PipeWire session:
+`ctest --test-dir build` runs the Linux-native unit and contract tests plus the
+Wine integration tests below (they SKIP without wine, `pw-cli`, a running
+PipeWire daemon, and an installed driver). The two Wine-based tools can also be
+run directly against a live PipeWire session:
 
 ```sh
 ./build/tests/asio_probe/run.sh        # COM lifecycle + bufferSwitch cycle rate
