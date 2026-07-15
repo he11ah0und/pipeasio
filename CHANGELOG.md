@@ -6,6 +6,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-07-15
+
 ### Fixed
 
 - RT thread priority no longer preempts the PipeWire graph driver
@@ -262,7 +264,8 @@ the driver loads inside the Steam Runtime container that Proton uses.
 - Hardened channel-count limits from both the INI and the environment overrides,
   and tightened COM teardown and several NULL and error paths.
 
-[Unreleased]: https://github.com/M0n7y5/pipeasio/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/M0n7y5/pipeasio/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/M0n7y5/pipeasio/releases/tag/v1.2.2
 [1.2.1]: https://github.com/M0n7y5/pipeasio/releases/tag/v1.2.1
 [1.2.0]: https://github.com/M0n7y5/pipeasio/releases/tag/v1.2.0
 [1.1.0]: https://github.com/M0n7y5/pipeasio/releases/tag/v1.1.0
