@@ -306,8 +306,8 @@ and are the usual causes of trouble elsewhere:
 - **PipeWire version.** 1.6 or newer is needed for the forced quantum/rate that
   pins low latency. On older PipeWire the driver still runs but logs a warning
   and follows the graph's own quantum, so latency is higher.
-- **Real-time priority.** The most common reason low latency is worse off Arch.
-  See [Performance](#performance).
+- **Real-time priority.** The driver requests `SCHED_FIFO` priority 15 by default.
+  See [Performance](#performance) for access requirements.
 
 ## Configuration
 
@@ -379,13 +379,15 @@ Env: `PIPEASIO_CLIENT_NAME`.
 
 A few knobs affect xrun-free, low-latency operation:
 
-- Real-time scheduling. The audio threads run at `SCHED_FIFO`, which the kernel
-  grants only if your user may take real-time priority. On Arch and CachyOS the
-  `realtime-privileges` package handles this (the `audio` group plus an `rtprio`
-  rule in `/etc/security/limits.d/`). On other distributions you usually set it
-  up yourself, as the driver does not use rtkit. Without the grant the threads
+- Real-time scheduling. The driver requests `SCHED_FIFO` priority 15 by default
+  (the previous native/WoW64 defaults were 77/80). It must stay below the
+  PipeWire daemon's data loop: RTKit caps that loop at 20 on stock desktops,
+  while PAM/realtime-group setups may run it higher, where either value is
+  below the daemon. On other distributions you usually set real-time access
+  up yourself; the driver does not use RTKit. Without the grant the threads
   fall back to normal scheduling and small buffers become far more xrun-prone.
-  Verify with `ulimit -r` (it should be at least 80).
+  Verify with `ulimit -r` (at least 15 for the default; use a higher limit only
+  if you pin `loop.rt-prio`).
 - Channel count. Every input and output is a PipeWire port the graph must
   schedule. Defaults are 2 in / 2 out. Raise `inputs` / `outputs` only to what you
   route. Fewer ports mean a smaller graph and less overhead.

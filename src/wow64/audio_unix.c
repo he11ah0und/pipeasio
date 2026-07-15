@@ -44,8 +44,11 @@
 /* Minimum host-reply wait per RT cycle. */
 #define PAU_RT_DEADLINE_FLOOR_NS 5000000L
 
-/* SCHED_FIFO priority the PE pump self-raises to (see wow64_wait_callback). */
-#define PAU_PUMP_RT_PRIORITY 80
+/* SCHED_FIFO priority the PE pump self-raises to (see wow64_wait_callback).
+ * Must stay BELOW the PipeWire daemon's data loop - RTKit caps it at 20 on
+ * stock desktops - or the pump preempts the graph driver and causes
+ * system-wide xruns (issue #4). */
+#define PAU_PUMP_RT_PRIORITY 15
 
 /* Token table for unix-side pointers. */
 

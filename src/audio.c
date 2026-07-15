@@ -107,10 +107,14 @@ audio_current_thread_id(void)
 #define AUDIO_RT_PRIO_MIN 1
 #define AUDIO_RT_PRIO_MAX 80
 /* Used when PipeWire asks for the module default (-1): we bypass
- * module-rt/RTKit, so pick our own.  77 sits below the PipeWire daemon's
- * data loop (88 by default) - the graph driver must preempt us - and above
- * typical desktop RT users. */
-#define AUDIO_RT_PRIO_DEFAULT 77
+ * module-rt/RTKit, so pick our own.  The PipeWire daemon's data loop gets
+ * its RT priority through RTKit on stock desktops, whose default cap is 20
+ * (RR 20 observed on Arch) - NOT the 88 from pipewire.conf.  Our thread runs
+ * the ASIO host's entire DSP callback for milliseconds per cycle, so it MUST
+ * sit BELOW the graph driver: anything above it preempts the daemon, starves
+ * the device, and turns other playing streams into xruns/pops (issue #4).
+ * 15 stays under RTKit's 20 while still beating normal desktop threads. */
+#define AUDIO_RT_PRIO_DEFAULT 15
 
 #ifndef PIPEASIO_AUDIO_UNIXLIB
 /* Wine RT thread bridge for the PipeWire data loop. */

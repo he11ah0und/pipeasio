@@ -6,6 +6,18 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- RT thread priority no longer preempts the PipeWire graph driver
+  ([#4](https://github.com/M0n7y5/pipeasio/issues/4)): the default
+  `SCHED_FIFO` priority applied to the driver's process thread (and the
+  32-bit WoW64 pump) dropped from 77/80 to 15. On stock desktops (the common
+  case), RTKit caps the daemon's data loop at priority 20, so 77/80 could
+  preempt it and starve the audio server whenever other streams were active,
+  causing system-wide xruns, pops, and DAW CPU meter spikes that persisted
+  until the driver was reloaded; PAM-rtprio setups where the daemon runs at 88
+  had no priority inversion.
+
 ## [1.2.1] - 2026-07-02
 
 ### Changed
