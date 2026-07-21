@@ -56,10 +56,9 @@ test_cross_language()
     c.inputs              = 10;
     c.outputs             = 12;
     c.buffer_size         = 2048;
-    c.fixed_buffer_size   = true;
+    c.buffer_mode         = PIPEASIO_BUFFER_MODE_WIRELESS;
     c.sample_rate         = 44100;
     c.auto_connect        = true;
-    c.follow_device_clock = true;
     c.rt_priority         = 30;
     std::strcpy(c.output_device, "sink.test");
     std::strcpy(c.node_name, "Bar");
@@ -71,10 +70,11 @@ test_cross_language()
     CHECK(d.inputs == 10);
     CHECK(d.outputs == 12);
     CHECK(d.buffer_size == 2048);
-    CHECK(d.fixed_buffer_size == true);
+    CHECK(d.buffer_mode == PIPEASIO_BUFFER_MODE_WIRELESS);
+    CHECK(d.fixed_buffer_size == false);   /* mirror of WIRELESS */
+    CHECK(d.follow_device_clock == true);  /* mirror of WIRELESS */
     CHECK(d.sample_rate == 44100);
     CHECK(d.auto_connect == true);
-    CHECK(d.follow_device_clock == true);
     CHECK(d.rt_priority == 30);
     CHECK(std::strcmp(d.output_device, "sink.test") == 0);
     CHECK(d.input_device[0] == '\0');

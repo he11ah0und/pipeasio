@@ -385,8 +385,7 @@ static const struct pw_filter_events audio_filter_events = {
     PW_VERSION_FILTER_EVENTS,
     .state_changed = audio_on_state_changed,
     .io_changed    = audio_on_io_changed,
-
-    .process = audio_on_process,
+    .process       = audio_on_process,
 };
 
 /* Core and registry event forward declarations. */
@@ -879,6 +878,7 @@ audio_set_follow_device(audio_client_t *c, bool follow)
         return;
     c->follow_device = follow;
 }
+
 
 void
 audio_set_rt_priority(audio_client_t *c, int priority)

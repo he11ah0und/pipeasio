@@ -64,8 +64,7 @@ class SettingsDialog : public QDialog
     QComboBox *m_outputDevice      = nullptr;
     QComboBox *m_inputDevice       = nullptr;
     QCheckBox *m_autoConnect       = nullptr;
-    QCheckBox *m_fixedBuffer       = nullptr;
-    QCheckBox *m_followDeviceClock = nullptr;
+    QComboBox *m_bufferMode        = nullptr;
     QLineEdit *m_nodeName          = nullptr;
     QSpinBox  *m_rtPriority        = nullptr;
 

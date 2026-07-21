@@ -117,9 +117,9 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent)
     m_cfgWatch->start();
     for (QSpinBox *sb : { m_inputs, m_outputs, m_rtPriority })
         connect(sb, &QSpinBox::valueChanged, this, &SettingsDialog::markDirty);
-    for (QComboBox *cb : { m_bufferSize, m_sampleRate, m_outputDevice, m_inputDevice })
+    for (QComboBox *cb : { m_bufferSize, m_bufferMode, m_sampleRate, m_outputDevice, m_inputDevice })
         connect(cb, &QComboBox::currentIndexChanged, this, &SettingsDialog::markDirty);
-    for (QCheckBox *ck : { m_autoConnect, m_fixedBuffer, m_followDeviceClock })
+    for (QCheckBox *ck : { m_autoConnect })
         connect(ck, &QCheckBox::toggled, this, &SettingsDialog::markDirty);
     connect(m_nodeName, &QLineEdit::textEdited, this, &SettingsDialog::markDirty);
 
@@ -238,16 +238,18 @@ SettingsDialog::buildSettingsTab()
            QStringLiteral("Automatically connect the driver's ports to the selected (or "
                           "default) device. Turn off to wire connections yourself."));
 
-    m_fixedBuffer = new QCheckBox(page);
-    addRow(QStringLiteral("Fixed buffer size"), m_fixedBuffer,
-           QStringLiteral("When on, PipeWire controls the buffer size and the host cannot "
-                          "change it. When off, the host may set PipeWire's quantum."));
-
-    m_followDeviceClock = new QCheckBox(page);
-    addRow(QStringLiteral("Follow device clock (Bluetooth)"), m_followDeviceClock,
-           QStringLiteral("Follow the target device's clock instead of forcing the graph "
-                          "quantum. Required for Bluetooth sinks (their clock can't be "
-                          "slaved); raises latency. Leave off for wired low-latency output."));
+    m_bufferMode = new QComboBox(page);
+    m_bufferMode->addItem(QStringLiteral("Free (host chooses)"), PIPEASIO_BUFFER_MODE_FREE);
+    m_bufferMode->addItem(QStringLiteral("Fixed (locked to buffer size)"),
+                          PIPEASIO_BUFFER_MODE_FIXED);
+    m_bufferMode->addItem(QStringLiteral("Wireless (follow device clock)"),
+                          PIPEASIO_BUFFER_MODE_WIRELESS);
+    addRow(QStringLiteral("Buffer mode"), m_bufferMode,
+           QStringLiteral("Free: the host picks the buffer size, PipeWire's quantum follows. "
+                          "Fixed: locked to the configured buffer size, quantum forced 1:1. "
+                          "Zero-Copy: Fixed plus a shared-memory backend (experimental). "
+                          "Wireless: follow the target device's clock (Bluetooth sinks; "
+                          "raises latency)."));
 
     m_nodeName = new QLineEdit(page);
     m_nodeName->setPlaceholderText(QStringLiteral("(derive from application name)"));
@@ -448,8 +450,8 @@ SettingsDialog::applyConfig(const pipeasio_config &c)
     m_inputDevice->setCurrentIndex(inIdx >= 0 ? inIdx : 0);
 
     m_autoConnect->setChecked(c.auto_connect);
-    m_fixedBuffer->setChecked(c.fixed_buffer_size);
-    m_followDeviceClock->setChecked(c.follow_device_clock);
+    int modeIdx = m_bufferMode->findData(c.buffer_mode);
+    m_bufferMode->setCurrentIndex(modeIdx >= 0 ? modeIdx : PIPEASIO_DEFAULT_BUFFER_MODE);
     m_nodeName->setText(QString::fromUtf8(c.node_name));
 
     m_rtPriority->setValue(c.rt_priority);
@@ -472,10 +474,9 @@ SettingsDialog::onApply()
     cfg.inputs              = m_inputs->value();
     cfg.outputs             = m_outputs->value();
     cfg.buffer_size         = currentBufferSize();
-    cfg.fixed_buffer_size   = m_fixedBuffer->isChecked();
+    cfg.buffer_mode         = m_bufferMode->currentData().toInt();
     cfg.sample_rate         = currentSampleRate();
     cfg.auto_connect        = m_autoConnect->isChecked();
-    cfg.follow_device_clock = m_followDeviceClock->isChecked();
     cfg.rt_priority         = m_rtPriority->value();
 
     const QByteArray out = m_outputDevice->currentData().toString().toUtf8();

@@ -548,6 +548,7 @@ config_watch_proc(LPVOID arg)
             pipeasio_config_load(&newcfg);
 #endif
             bool live_changed   = newcfg.buffer_size != last_cfg.buffer_size
+                                  || newcfg.buffer_mode != last_cfg.buffer_mode
                                   || newcfg.fixed_buffer_size != last_cfg.fixed_buffer_size
                                   || newcfg.sample_rate != last_cfg.sample_rate
                                   || newcfg.follow_device_clock != last_cfg.follow_device_clock
@@ -1677,6 +1678,21 @@ pipeasio_host_is_running(void *This)
     return ((IPipeASIOImpl *)This)->host_driver_state == Running;
 }
 
+static void
+process_silence(IPipeASIOImpl *This, audio_nframes_t nframes)
+{
+    /* output silence if the host callback isn't running yet */
+    for (int i = 0; i < This->host_active_outputs; i++)
+    {
+        audio_port_t   *port = This->output_channel[i].port;
+        audio_sample_t *dst  = audio_port_get_buffer(port, nframes);
+        audio_silence(dst,
+                      audio_clamp_frames(dst, audio_port_buffer_avail_frames(port), nframes));
+    }
+}
+
+/* Standard RT callback: gather host inputs from the pool, run the host, then
+ * scatter its outputs back (one memcpy per channel per direction). */
 static int
 process_callback(audio_nframes_t nframes, void *arg)
 {
@@ -1684,20 +1700,11 @@ process_callback(audio_nframes_t nframes, void *arg)
 
     int i;
 
-    /* output silence if the host callback isn't running yet */
     if (atomic_load_explicit(&This->host_driver_state, memory_order_relaxed) != Running)
     {
-        for (i = 0; i < This->host_active_outputs; i++)
-        {
-            audio_port_t   *port = This->output_channel[i].port;
-            audio_sample_t *dst  = audio_port_get_buffer(port, nframes);
-            audio_silence(dst,
-                          audio_clamp_frames(dst, audio_port_buffer_avail_frames(port), nframes));
-        }
+        process_silence(This, nframes);
         return 0;
     }
-
-    /* copy device input to host buffers */
     for (i = 0; i < This->pipeasio_number_inputs; i++)
         if (This->input_channel[i].active)
         {

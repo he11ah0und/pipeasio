@@ -37,6 +37,7 @@ defaults()
     c.auto_connect        = PIPEASIO_DEFAULT_AUTO_CONNECT;
     c.follow_device_clock = PIPEASIO_DEFAULT_FOLLOW_DEVICE_CLOCK;
     c.rt_priority         = PIPEASIO_DEFAULT_RT_PRIORITY;
+    c.buffer_mode         = PIPEASIO_DEFAULT_BUFFER_MODE;
     c.output_device[0]    = '\0';
     c.input_device[0]     = '\0';
     c.node_name[0]        = '\0';

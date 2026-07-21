@@ -47,6 +47,7 @@
 #define PIPEASIO_KEY_INPUT_DEVICE "input_device"
 #define PIPEASIO_KEY_NODE_NAME "node_name"
 #define PIPEASIO_KEY_FOLLOW_DEVICE_CLOCK "follow_device_clock"
+#define PIPEASIO_KEY_BUFFER_MODE "buffer_mode"
 #define PIPEASIO_KEY_RT_PRIORITY "rt_priority"
 
 /* --- Defaults ------------------------------------------------------------- */
@@ -58,6 +59,18 @@
 #define PIPEASIO_DEFAULT_AUTO_CONNECT true
 #define PIPEASIO_DEFAULT_FOLLOW_DEVICE_CLOCK false
 #define PIPEASIO_DEFAULT_RT_PRIORITY 15 /* below the PipeWire daemon (~20) */
+
+/* Buffer modes (the buffer_mode key; supersedes the legacy
+ * fixed_buffer_size / follow_device_clock booleans, which stay as derived
+ * mirrors for older readers). */
+enum
+{
+    PIPEASIO_BUFFER_MODE_FREE = 0,     /* host picks the size, quantum follows it */
+    PIPEASIO_BUFFER_MODE_FIXED = 1,    /* locked to buffer_size, quantum forced 1:1 */
+    /* 2 was the removed Zero-Copy experiment; invalid, falls back to FIXED */
+    PIPEASIO_BUFFER_MODE_WIRELESS = 3  /* follow the target device's quantum (BT) */
+};
+#define PIPEASIO_DEFAULT_BUFFER_MODE PIPEASIO_BUFFER_MODE_FIXED
 
 #define PIPEASIO_MIN_RT_PRIORITY 1
 #define PIPEASIO_MAX_RT_PRIORITY 80
@@ -99,8 +112,11 @@ struct pipeasio_config
 
     /* Appended at the END: the struct crosses the WoW64 unix ABI
      * (pa_load_config_params), so existing field offsets must not move.
-     * Size went 792 -> 796; tests/wow64/unix_abi_layout.c pins it. */
+     * Size went 792 -> 796 -> 800; tests/wow64/unix_abi_layout.c pins it. */
     int rt_priority; /* SCHED_FIFO priority, PIPEASIO_MIN..MAX_RT_PRIORITY */
+
+    /* Appended at the END (see above). */
+    int buffer_mode; /* PIPEASIO_BUFFER_MODE_* */
 };
 
 #ifdef __cplusplus

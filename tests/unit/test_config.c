@@ -166,6 +166,7 @@ main(void)
         w.auto_connect        = false;
         w.follow_device_clock = true;
         w.rt_priority         = 25;
+        w.buffer_mode         = PIPEASIO_BUFFER_MODE_WIRELESS;
         snprintf(w.output_device, sizeof w.output_device, "sink.test");
         snprintf(w.input_device, sizeof w.input_device, "src.test");
         snprintf(w.node_name, sizeof w.node_name, "MyNode");
@@ -197,6 +198,51 @@ main(void)
         }
         EXPECT_TRUE(strstr(body, "[pipeasio]") != NULL);
         EXPECT_TRUE(strstr(body, "buffer_size = 512") != NULL);
+        EXPECT_TRUE(strstr(body, "buffer_mode = 3") != NULL);
+        EXPECT_EQ(r.buffer_mode, PIPEASIO_BUFFER_MODE_WIRELESS);
+    }
+
+    /* Migration: an INI with only the legacy booleans derives the mode. */
+    TEST_GROUP("legacy booleans migrate to buffer_mode")
+    {
+        write_cfg("[pipeasio]\n"
+                  "fixed_buffer_size = 1\n"
+                  "follow_device_clock = 0\n");
+        struct pipeasio_config c;
+        pipeasio_config_load(&c);
+        EXPECT_EQ(c.buffer_mode, PIPEASIO_BUFFER_MODE_FIXED);
+        EXPECT_EQ(c.fixed_buffer_size, true);
+
+        write_cfg("[pipeasio]\n"
+                  "fixed_buffer_size = 0\n"
+                  "follow_device_clock = 1\n");
+        pipeasio_config_load(&c);
+        EXPECT_EQ(c.buffer_mode, PIPEASIO_BUFFER_MODE_WIRELESS);
+
+        write_cfg("[pipeasio]\n"
+                  "fixed_buffer_size = 0\n"
+                  "follow_device_clock = 0\n");
+        pipeasio_config_load(&c);
+        EXPECT_EQ(c.buffer_mode, PIPEASIO_BUFFER_MODE_FREE);
+
+        /* buffer_mode wins over the legacy keys when both are present. */
+        write_cfg("[pipeasio]\n"
+                  "fixed_buffer_size = 1\n"
+                  "buffer_mode = 0\n");
+        pipeasio_config_load(&c);
+        EXPECT_EQ(c.buffer_mode, PIPEASIO_BUFFER_MODE_FREE);
+        EXPECT_EQ(c.fixed_buffer_size, false);
+    }
+
+    /* The derived booleans mirror the mode after load. */
+    TEST_GROUP("mode derives booleans")
+    {
+        write_cfg("[pipeasio]\n"
+                  "buffer_mode = 2\n");
+        struct pipeasio_config c;
+        pipeasio_config_load(&c);
+        EXPECT_EQ(c.fixed_buffer_size, true);   /* Zero-Copy implies fixed */
+        EXPECT_EQ(c.follow_device_clock, false);
     }
 
     remove_cfg();

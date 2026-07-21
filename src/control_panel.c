@@ -60,8 +60,7 @@
  * (settings panel or an editor), unless the user has unsaved edits. */
 
 #define CP_IDC_BUFFER 100
-#define CP_IDC_FIXED 101
-#define CP_IDC_FOLLOW 102
+#define CP_IDC_MODE 101
 #define CP_IDC_OPENPANEL 103
 #define CP_IDC_OK 104
 #define CP_IDC_CANCEL 105
@@ -76,7 +75,7 @@ typedef struct cp_state
 {
     struct pipeasio_config cfg; /* values as last loaded from the file */
     uint64_t               fp;  /* config file fingerprint */
-    HWND                 combo, fixed_cb, follow_cb;
+    HWND                 combo, mode_cb;
     HWND                 tab, native_btn, latency, detect_lbl;
     HWND                 page1[8], page2[8]; /* controls per tab page (show/hide) */
     int                  page1n, page2n;
@@ -146,8 +145,11 @@ cp_fill_controls(cp_state *st)
         sel = n;
     }
     SendMessageA(st->combo, CB_SETCURSEL, sel, 0);
-    SendMessageA(st->fixed_cb, BM_SETCHECK, st->cfg.fixed_buffer_size, 0);
-    SendMessageA(st->follow_cb, BM_SETCHECK, st->cfg.follow_device_clock, 0);
+    /* combo indices differ from mode values: 0=Free, 1=Fixed, 2=Wireless(3) */
+    SendMessageA(st->mode_cb, CB_SETCURSEL,
+                 st->cfg.buffer_mode == PIPEASIO_BUFFER_MODE_WIRELESS ? 2
+                                                                     : st->cfg.buffer_mode,
+                 0);
     cp_update_latency(st);
 }
 
@@ -192,8 +194,8 @@ cp_save_from_controls(cp_state *st)
     struct pipeasio_config c;
     cp_config_load(&c); /* fresh base: fields we don't edit are preserved */
     c.buffer_size         = cp_combo_value(st->combo);
-    c.fixed_buffer_size   = SendMessageA(st->fixed_cb, BM_GETCHECK, 0, 0) == BST_CHECKED;
-    c.follow_device_clock = SendMessageA(st->follow_cb, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    const LRESULT mode_sel = SendMessageA(st->mode_cb, CB_GETCURSEL, 0, 0);
+    c.buffer_mode          = mode_sel == 2 ? PIPEASIO_BUFFER_MODE_WIRELESS : (int)mode_sel;
     if (!pipeasio_buffer_size_valid(c.buffer_size))
         return FALSE;
     if (!cp_config_save(&c))
@@ -272,9 +274,9 @@ cp_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 cp_update_latency(st);
             }
             break;
-        case CP_IDC_FIXED:
-        case CP_IDC_FOLLOW:
-            st->dirty = TRUE;
+        case CP_IDC_MODE:
+            if (HIWORD(wp) == CBN_SELCHANGE)
+                st->dirty = TRUE;
             break;
         case CP_IDC_OPENPANEL:
             cp_open_settings_panel();
@@ -463,13 +465,16 @@ cp_run_dialog(void)
     CP_ADD(&st, 1, st.combo);
     st.latency = CreateWindowA("STATIC", "", WS_CHILD, 212, 48, 150, 18, dlg, NULL, inst, NULL);
     CP_ADD(&st, 1, st.latency);
-    st.fixed_cb = CreateWindowA("BUTTON", "Fixed buffer size", WS_CHILD | BS_AUTOCHECKBOX, 24,
-                                78, 220, 20, dlg, (HMENU)(INT_PTR)CP_IDC_FIXED, inst, NULL);
-    CP_ADD(&st, 1, st.fixed_cb);
-    st.follow_cb = CreateWindowA("BUTTON", "Follow device clock (Bluetooth)",
-                                 WS_CHILD | BS_AUTOCHECKBOX, 24, 103, 260, 20, dlg,
-                                 (HMENU)(INT_PTR)CP_IDC_FOLLOW, inst, NULL);
-    CP_ADD(&st, 1, st.follow_cb);
+    CP_ADD(&st, 1, CreateWindowA("STATIC", "Buffer mode:", WS_CHILD, 24, 81, 90, 18, dlg,
+                                 NULL, inst, NULL));
+    st.mode_cb = CreateWindowA("COMBOBOX", "", WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL, 115,
+                               78, 220, 140, dlg, (HMENU)(INT_PTR)CP_IDC_MODE, inst, NULL);
+    CP_ADD(&st, 1, st.mode_cb);
+    static const char *modes[] = { "Free (host chooses)", "Fixed (locked to buffer size)",
+                                   NULL, "Wireless (follow device clock)" };
+    for (int i = 0; i < 4; i++)
+        if (modes[i])
+            SendMessageA(st.mode_cb, CB_ADDSTRING, 0, (LPARAM)modes[i]);
 
     /* Page 2: About. */
     char ver[128];

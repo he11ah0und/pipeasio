@@ -363,6 +363,7 @@ audio_observed_quantum(audio_client_t *client)
     return simple_u32((proxy_ctx *)client, PAU_OBSERVED_QUANTUM);
 }
 
+
 uint64_t
 audio_get_time_nsec(audio_client_t *client)
 {

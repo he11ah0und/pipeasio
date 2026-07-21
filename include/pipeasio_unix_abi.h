@@ -24,7 +24,7 @@
 
 #include "pipeasio_config.h"
 
-#define PIPEASIO_UNIX_ABI_VERSION 1
+#define PIPEASIO_UNIX_ABI_VERSION 2
 
 /* Unix-side token handle.  Zero is NULL. */
 typedef uint32_t pa_handle;

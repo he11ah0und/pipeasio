@@ -102,6 +102,7 @@ set_defaults(struct pipeasio_config *c)
     c->auto_connect        = PIPEASIO_DEFAULT_AUTO_CONNECT;
     c->follow_device_clock = PIPEASIO_DEFAULT_FOLLOW_DEVICE_CLOCK;
     c->rt_priority         = PIPEASIO_DEFAULT_RT_PRIORITY;
+    c->buffer_mode         = PIPEASIO_DEFAULT_BUFFER_MODE;
     c->output_device[0]    = '\0';
     c->input_device[0]     = '\0';
     c->node_name[0]        = '\0';
@@ -126,6 +127,8 @@ apply_kv(struct pipeasio_config *c, const char *key, const char *val)
         c->follow_device_clock = parse_bool(val);
     else if (!strcmp(key, PIPEASIO_KEY_RT_PRIORITY))
         c->rt_priority = atoi(val);
+    else if (!strcmp(key, PIPEASIO_KEY_BUFFER_MODE))
+        c->buffer_mode = atoi(val);
     else if (!strcmp(key, PIPEASIO_KEY_OUTPUT_DEVICE))
         copy_str(c->output_device, sizeof c->output_device, val);
     else if (!strcmp(key, PIPEASIO_KEY_INPUT_DEVICE))
@@ -133,6 +136,16 @@ apply_kv(struct pipeasio_config *c, const char *key, const char *val)
     else if (!strcmp(key, PIPEASIO_KEY_NODE_NAME))
         copy_str(c->node_name, sizeof c->node_name, val);
     /* unknown keys are ignored */
+}
+
+/* Derive the legacy booleans from buffer_mode; the rest of the code keeps
+ * reading them.  fixed = locked quantum (Fixed),
+ * follow = device-driven quantum (Wireless). */
+static void
+apply_mode(struct pipeasio_config *c)
+{
+    c->fixed_buffer_size   = c->buffer_mode == PIPEASIO_BUFFER_MODE_FIXED;
+    c->follow_device_clock = c->buffer_mode == PIPEASIO_BUFFER_MODE_WIRELESS;
 }
 
 static void
@@ -151,12 +164,18 @@ validate(struct pipeasio_config *c)
 
     if (c->rt_priority < PIPEASIO_MIN_RT_PRIORITY || c->rt_priority > PIPEASIO_MAX_RT_PRIORITY)
         c->rt_priority = PIPEASIO_DEFAULT_RT_PRIORITY;
+
+    if (c->buffer_mode != PIPEASIO_BUFFER_MODE_FREE && c->buffer_mode != PIPEASIO_BUFFER_MODE_FIXED
+        && c->buffer_mode != PIPEASIO_BUFFER_MODE_WIRELESS)
+        c->buffer_mode = PIPEASIO_DEFAULT_BUFFER_MODE;
+    apply_mode(c); /* legacy booleans always mirror the mode */
 }
 
 bool
 pipeasio_config_load(struct pipeasio_config *out)
 {
     set_defaults(out);
+    out->buffer_mode = -1; /* sentinel: derive from legacy booleans when absent */
 
     char path[1024];
     if (!pipeasio_config_path(path, sizeof path))
@@ -197,15 +216,31 @@ pipeasio_config_load(struct pipeasio_config *out)
     }
 
     fclose(f);
+
+    /* Migration: an INI without buffer_mode keeps the old boolean meaning. */
+    if (out->buffer_mode < 0)
+    {
+        if (out->follow_device_clock)
+            out->buffer_mode = PIPEASIO_BUFFER_MODE_WIRELESS;
+        else if (out->fixed_buffer_size)
+            out->buffer_mode = PIPEASIO_BUFFER_MODE_FIXED;
+        else
+            out->buffer_mode = PIPEASIO_BUFFER_MODE_FREE;
+    }
     validate(out);
     return true;
 }
 
 /* The single writer for the panel's INI format; the Qt panel calls this too,
- * so the on-disk layout has exactly one implementation. */
+ * so the on-disk layout has exactly one implementation.  Legacy booleans are
+ * re-derived from buffer_mode here so the file can never skew. */
 bool
 pipeasio_config_save(const struct pipeasio_config *c)
 {
+    struct pipeasio_config m = *c;
+    apply_mode(&m);
+    c = &m;
+
     char path[1024];
     if (!pipeasio_config_path(path, sizeof path))
         return false;
@@ -239,6 +274,7 @@ pipeasio_config_save(const struct pipeasio_config *c)
     fprintf(f, PIPEASIO_KEY_SAMPLE_RATE " = %d\n", c->sample_rate);
     fprintf(f, PIPEASIO_KEY_AUTO_CONNECT " = %d\n", c->auto_connect ? 1 : 0);
     fprintf(f, PIPEASIO_KEY_FOLLOW_DEVICE_CLOCK " = %d\n", c->follow_device_clock ? 1 : 0);
+    fprintf(f, PIPEASIO_KEY_BUFFER_MODE " = %d\n", c->buffer_mode);
     fprintf(f, PIPEASIO_KEY_RT_PRIORITY " = %d\n", c->rt_priority);
     fprintf(f, PIPEASIO_KEY_OUTPUT_DEVICE " = %s\n", c->output_device);
     fprintf(f, PIPEASIO_KEY_INPUT_DEVICE " = %s\n", c->input_device);
