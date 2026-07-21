@@ -375,6 +375,15 @@ Overrides the PipeWire client/node name (otherwise derived from the host program
 name).
 Env: `PIPEASIO_CLIENT_NAME`.
 
+### buffer_mode
+How the driver's buffer relates to the PipeWire graph. Supersedes the legacy
+`fixed_buffer_size` / `follow_device_clock` booleans (they stay readable as
+derived mirrors). `0` = Free: the host picks the size and the quantum follows
+it. `1` (default) = Fixed: locked to `buffer_size`, the graph quantum is
+forced 1:1. `3` = Wireless: follow the target device's own quantum instead -
+the mode for Bluetooth sinks, whose clock is the radio link (this is what
+`follow_device_clock` did). `2` is invalid and falls back to Fixed.
+
 ### rt_priority
 The `SCHED_FIFO` priority requested for the driver's real-time data thread.
 Default 15, valid range 1-80, out-of-range values fall back to 15. It must stay
@@ -413,9 +422,15 @@ A few knobs affect xrun-free, low-latency operation:
 The native settings panel (`pipeasio-settings`, C++/Qt6 Widgets) is built from the
 `gui` subdirectory and installed to `bin`, together with a desktop entry and icon,
 so it also appears in the application menu as **PipeASIO Settings**. It runs on
-your Linux host. The in-app ASIO control-panel button shows a message pointing
-here, because the Qt panel cannot run inside the Wine/Proton container the host
-loads the driver into.
+your Linux host.
+
+The in-app ASIO control-panel button first tries to hand off to that native
+panel (via `flatpak-spawn --host` inside containers, plain `ShellExecute` on a
+host Wine). When the native panel is not launchable, a built-in Win32 dialog
+opens instead, with Settings (buffer size, buffer mode, latency) and About
+(version, config path, panel detection) tabs. Both the dialog and the Qt panel
+watch the config file and reload on external changes, so edits stay in sync
+whichever side you use.
 
 ## Troubleshooting
 

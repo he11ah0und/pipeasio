@@ -13,6 +13,16 @@ follow [Semantic Versioning](https://semver.org/).
   `pw-top` subprocesses - connections, device hotplug and DSP stats update
   event-driven.  The graph logic (`GraphModel`) is PipeWire-free and covered
   by headless tests that replay recorded registry/node/profiler events.
+- Editable ASIO ControlPanel: the host's control-panel button hands off to
+  the native `pipeasio-settings` when launchable (`flatpak-spawn --host` in
+  containers, `ShellExecute` on a host Wine) and falls back to a built-in
+  Win32 dialog (Settings + About tabs) otherwise.  The dialog and the Qt
+  panel watch the config and reload on external changes.
+- `buffer_mode` config key (0 Free / 1 Fixed / 3 Wireless), superseding the
+  `fixed_buffer_size` / `follow_device_clock` booleans; Wireless follows the
+  target device's quantum (Bluetooth).
+- The settings panel shows the build identifier in the window title and the
+  About tab, and exposes `rt_priority` and `buffer_mode` controls.
 - Virtual audio devices (e.g. `easyeffects_source` and other nodes without
   a hardware device behind them) are now valid auto-connect targets: their
   monitor ports are matched as sources, so effects chains and virtual mics
