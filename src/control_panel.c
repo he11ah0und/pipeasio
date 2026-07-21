@@ -285,8 +285,10 @@ cp_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             cp_copy_to_clipboard(hwnd, st->cfg_path);
             break;
         case CP_IDC_OK:
-            cp_save_from_controls(st);
-            DestroyWindow(hwnd);
+            /* Keep the dialog open when the save failed - OK must not
+             * silently discard the user's edits. */
+            if (cp_save_from_controls(st))
+                DestroyWindow(hwnd);
             return 0;
         case CP_IDC_APPLY:
             cp_save_from_controls(st);

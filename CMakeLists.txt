@@ -147,6 +147,7 @@ if(BUILD_WOW64_32)
                 "${CMAKE_SOURCE_DIR}/src/main.c"
                 "${CMAKE_SOURCE_DIR}/src/regsvr.c"
                 "${CMAKE_SOURCE_DIR}/src/config.c"
+                "${CMAKE_SOURCE_DIR}/src/control_panel.c"
                 "${CMAKE_SOURCE_DIR}/src/wow64/audio_proxy.c"
                 "${PA32_DEF}" ${_pa32_imp_libs}
         VERBATIM COMMAND_EXPAND_LISTS
