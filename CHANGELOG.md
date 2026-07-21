@@ -6,6 +6,21 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Building with distro-injected LTO CFLAGS (e.g. Fedora RPM's `-flto=auto`)
+  failed at the winegcc link with `pipeasio.dll.spec:1: function
+  'DllRegisterServer' not defined`
+  ([#6](https://github.com/M0n7y5/pipeasio/issues/6)): winebuild's `ld -r`
+  partial link leaves the `.spec` exports undefined in LTO objects even when
+  `nm` still shows them on the individual `.o` files. Object libraries that
+  feed winebuild/winegcc (the driver DLL and the WoW64 unixlib) now compile
+  with `-fno-lto`.
+- Debian/Ubuntu Wine SDK headers under the nested
+  `/usr/include/wine/wine/windows` layout (from `libwine-dev`) are now found
+  by `cmake/WineDLL.cmake`, so the driver configures and builds against
+  distro Wine packages without a manual `-DWINE_INCLUDE_DIRS=...`.
+
 ## [1.2.2] - 2026-07-15
 
 ### Fixed

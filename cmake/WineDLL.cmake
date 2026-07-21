@@ -27,6 +27,9 @@ if(NOT WINE_INCLUDE_DIRS)
     set(_wine_inc_candidates
         /usr/include/wine
         /usr/include/wine/windows
+        # Debian/Ubuntu nest the Windows SDK under wine/wine/ (libwine-dev).
+        /usr/include/wine/wine
+        /usr/include/wine/wine/windows
         /usr/include/wine-development
         /usr/include/wine-development/wine/windows
         /opt/wine-stable/include
@@ -57,6 +60,11 @@ function(add_wine_dll)
 
     # Compile sources to PIC .o files with the host gcc.  These objects are
     # consumed by both the winebuild (PE fake) and winegcc (ELF .so) steps.
+    # Force -fno-lto: distro CFLAGS often inject -flto=auto (Fedora); objects
+    # still show Dll* in nm, but winebuild's ld -r partial link leaves those
+    # symbols undefined so the .spec export scan fails ("function
+    # 'DllRegisterServer' not defined"). LTO bytecode is useless to
+    # winebuild/winegcc; objects need a real ELF symtab (issue #6).
     set(_objlib ${WDL_NAME}_objs)
     add_library(${_objlib} OBJECT ${WDL_SOURCES})
     set_target_properties(${_objlib} PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -70,6 +78,7 @@ function(add_wine_dll)
         -Wwrite-strings
         -Wpointer-arith
         -Werror=implicit-function-declaration
+        -fno-lto
         $<$<CONFIG:Release>:-O2 -DNDEBUG -fvisibility=hidden>
         $<$<CONFIG:RelWithDebInfo>:-O2 -g -DNDEBUG -fvisibility=hidden>
         $<$<CONFIG:Debug>:-O0 -g3 -DDEBUG -fno-omit-frame-pointer -fstack-protector-all>)
