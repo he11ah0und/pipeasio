@@ -141,8 +141,8 @@ bool audio_set_latency_callback(audio_client_t *client, audio_latency_cb cb, voi
 /* Connections / memory */
 
 bool audio_connect(audio_client_t *client, const char *src, const char *dst);
-/* Frees an array returned by audio_get_ports / audio_get_device_ports,
- * including the duplicated name strings. */
+/* Frees an array returned by audio_get_ports / audio_get_device_ports
+ * (single-block allocation, one free). */
 void audio_free_ports(const char **ports);
 
 /* RT copy helpers shared by the native (src/asio.c) and WoW64

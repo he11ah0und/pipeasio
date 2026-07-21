@@ -156,9 +156,6 @@ if(BUILD_WOW64_32)
     target_compile_options(pipeasio32_unix_objs PRIVATE
         -DPIPEASIO_AUDIO_UNIXLIB -D_REENTRANT
         -Wall -fno-strict-aliasing -Werror=implicit-function-declaration
-        # -fno-lto: same winebuild ld -r / .spec export hazard as add_wine_dll
-        # (issue #6).  Keep even though per-config flags moved to
-        # ${_pa32_config_cflags}.
         -fno-lto
         $<$<CONFIG:Release>:-fvisibility=hidden>
         $<$<CONFIG:RelWithDebInfo>:-fvisibility=hidden>

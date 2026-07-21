@@ -375,12 +375,25 @@ Overrides the PipeWire client/node name (otherwise derived from the host program
 name).
 Env: `PIPEASIO_CLIENT_NAME`.
 
+### rt_priority
+The `SCHED_FIFO` priority requested for the driver's real-time data thread.
+Default 15, valid range 1-80, out-of-range values fall back to 15. It must stay
+below the PipeWire daemon's data loop (RTKit caps that loop at 20 on stock
+desktops) or the driver can preempt the audio server and cause system-wide
+xruns; raise it only if you run the daemon higher yourself (e.g. a PAM/rtprio
+setup at 88). Unlike the other keys there is no environment override - INI only.
+
+In the 32-bit WoW64 build this key is accepted but has no effect: the unixlib
+runs its data loop on PipeWire's own thread-utils, and the RT bridge only
+exists in the native driver.
+
 ## Performance
 
 A few knobs affect xrun-free, low-latency operation:
 
 - Real-time scheduling. The driver requests `SCHED_FIFO` priority 15 by default
-  (the previous native/WoW64 defaults were 77/80). It must stay below the
+  (tunable via `rt_priority`, see Configuration; the previous native/WoW64
+  defaults were 77/80). It must stay below the
   PipeWire daemon's data loop: RTKit caps that loop at 20 on stock desktops,
   while PAM/realtime-group setups may run it higher, where either value is
   below the daemon. On other distributions you usually set real-time access

@@ -6,6 +6,37 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Virtual audio devices (e.g. `easyeffects_source` and other nodes without
+  a hardware device behind them) are now valid auto-connect targets: their
+  monitor ports are matched as sources, so effects chains and virtual mics
+  can feed the driver's inputs.
+- `rt_priority` config key: the `SCHED_FIFO` priority requested for the
+  driver's real-time data thread (default 15, range 1-80, INI only - no
+  environment override). In the 32-bit WoW64 build the key is accepted but
+  has no effect; the unixlib's data loop runs on PipeWire's thread-utils
+  and the RT bridge only exists in the native driver.
+- The driver logs a build identifier (build number + git hash + `-dirty`
+  marker) at startup; `build_info.h` is generated at configure time and
+  regenerated when the git state moves, so fresh build trees compile
+  without ordering tricks.
+- `pipeasio_config_save()`: a single atomic (tmp+rename) writer for the
+  panel's INI format in the driver core, with a save/load roundtrip unit
+  test. The settings panel and the ASIO ControlPanel switch to it in a
+  follow-up.
+
+### Changed
+
+- RT-safety and polling fixes in the driver core, and a deduplication
+  pass that removes dead code (net fewer lines in the core).
+- The filter node no longer sets `PW_KEY_NODE_GROUP` to `group.dsp.0`.
+
+### Fixed
+
+- WoW64 link: the `PAU_SET_RT_PRIORITY` call is now part of the unixlib
+  thunk table, so `pipeasio32` builds again.
+
 ## [1.2.3] - 2026-07-21
 
 ### Added
