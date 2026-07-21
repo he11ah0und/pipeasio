@@ -14,3 +14,13 @@ target_include_directories(test_panel PRIVATE
 target_compile_features(test_panel PRIVATE cxx_std_17)
 target_link_libraries(test_panel PRIVATE Qt6::Core)
 add_test(NAME test_panel COMMAND test_panel)
+
+# GraphModel: pure graph logic (no libpipewire), tested by replaying recorded
+# registry / node / profiler event sequences.
+add_executable(test_graphmodel
+    test_graphmodel.cpp
+    ${CMAKE_SOURCE_DIR}/gui/GraphModel.cpp)
+target_include_directories(test_graphmodel PRIVATE ${CMAKE_SOURCE_DIR}/gui)
+target_compile_features(test_graphmodel PRIVATE cxx_std_17)
+target_link_libraries(test_graphmodel PRIVATE Qt6::Core)
+add_test(NAME test_graphmodel COMMAND test_graphmodel)
