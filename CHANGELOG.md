@@ -18,7 +18,8 @@ follow [Semantic Versioning](https://semver.org/).
   has no effect; the unixlib's data loop runs on PipeWire's thread-utils
   and the RT bridge only exists in the native driver.
 - The driver logs a build identifier (build number + git hash + `-dirty`
-  marker) at startup; `build_info.h` is generated at configure time and
+  marker) once when its module loads, so even a failed startup shows which
+  binary was loaded; `build_info.h` is generated at configure time and
   regenerated when the git state moves, so fresh build trees compile
   without ordering tricks.
 - `pipeasio_config_save()`: a single atomic (tmp+rename) writer for the
