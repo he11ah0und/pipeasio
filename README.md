@@ -426,10 +426,19 @@ your Linux host.
 
 The in-app ASIO control-panel button first tries to hand off to that native
 panel (via `flatpak-spawn --host` inside containers, plain `ShellExecute` on a
-host Wine). When the native panel is not launchable, a built-in Win32 dialog
-opens instead, with Settings (buffer size, buffer mode, latency) and About
-(version, config path, panel detection) tabs. Both the dialog and the Qt panel
-watch the config file and reload on external changes, so edits stay in sync
+host Wine) - the native Linux panel is the primary interface and the intended
+way to use the driver. When it is not launchable, a built-in Win32 dialog
+opens instead.
+
+The Win32 dialog is deliberately minimal - quick driver interaction, not a
+second panel: buffer size, buffer mode and a latency readout on one Settings
+tab, plus a couple of About lines (version, config path). Its main case is
+bwrap-sandboxed apps like Flatpak Bottles, where the host's
+`pipeasio-settings` simply is not reachable from inside the container (unlike
+a plain host Wine, where it is right there in PATH), so without the fallback
+the control-panel button did nothing at all. The About tab points to the
+native panel for the full feature set. Both the dialog and the Qt panel watch
+the config file and reload on external changes, so edits stay in sync
 whichever side you use.
 
 ## Troubleshooting

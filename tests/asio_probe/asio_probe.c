@@ -225,6 +225,19 @@ main(void)
     LONG ver = asio->lpVtbl->GetDriverVersion(asio);
     fprintf(stderr, "[probe] driver: \"%s\" v%ld\n", name, (long)ver);
 
+    if (argc > 1 && !strcmp(argv[1], "controlpanel"))
+    {
+        /* Manual handoff test: CP button -> flatpak-spawn / PATH handoff to
+         * the native panel, or the built-in Win32 dialog.  Give a spawned
+         * panel a moment to appear before the process exits. */
+        LONG cprc = asio->lpVtbl->ControlPanel(asio);
+        fprintf(stderr, "[probe] ControlPanel -> %ld\n", (long)cprc);
+        Sleep(4000);
+        asio->lpVtbl->Release(asio);
+        CoUninitialize();
+        return 0;
+    }
+
     LONG nin = 0, nout = 0;
     asio->lpVtbl->GetChannels(asio, &nin, &nout);
     fprintf(stderr, "[probe] channels: %ld in / %ld out\n", (long)nin, (long)nout);
