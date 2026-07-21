@@ -34,8 +34,22 @@
 
 #include "pipeasio_log.h"
 
-/* Printed by audio_open to identify the loaded binary. */
+/* Printed to identify the loaded binary. */
 #define PIPEASIO_BUILD_TAG __DATE__ " " __TIME__
+
+/* Log the build id at module load, so even a failed audio_open shows which
+ * binary was loaded.  Runs via .init_array when the loader maps the .so
+ * (per host process), so a module reload naturally prints again.  Only raw
+ * write(2) + getenv are used (pipeasio_log.h), safe this early. */
+__attribute__((constructor)) static void
+audio_log_build(void)
+{
+    TRACE("loaded: build " PIPEASIO_BUILD_ID " " PIPEASIO_BUILD_TAG
+#ifdef PIPEASIO_AUDIO_UNIXLIB
+          " (wow64 unixlib)"
+#endif
+          "\n");
+}
 
 #include <pipewire/pipewire.h>
 #include <pipewire/thread.h>
@@ -487,8 +501,7 @@ audio_open(const char *client_name, uint32_t options, uint32_t *status)
      * default.audio.sink/source values only land on the next round-trip. */
     audio_sync(c);
 
-    TRACE("audio_open(%s) -> %p [build " PIPEASIO_BUILD_ID " " PIPEASIO_BUILD_TAG "] "
-          "(registry sync done: %u nodes, %u ports discovered)\n",
+    TRACE("audio_open(%s) -> %p (registry sync done: %u nodes, %u ports discovered)\n",
           c->name, c, c->n_nodes, c->n_discovered);
     return c;
 
