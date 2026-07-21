@@ -8,10 +8,16 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Settings panel: the Monitor tab and the device combos now follow a live
+  PipeWire graph model (`PipeWireGraph`) instead of polling `pw-dump` /
+  `pw-top` subprocesses - connections, device hotplug and DSP stats update
+  event-driven.  The graph logic (`GraphModel`) is PipeWire-free and covered
+  by headless tests that replay recorded registry/node/profiler events.
 - Virtual audio devices (e.g. `easyeffects_source` and other nodes without
   a hardware device behind them) are now valid auto-connect targets: their
   monitor ports are matched as sources, so effects chains and virtual mics
-  can feed the driver's inputs.
+  can feed the driver's inputs.  The panel lists `Audio/*/Virtual` devices
+  in the device combos too.
 - `rt_priority` config key: the `SCHED_FIFO` priority requested for the
   driver's real-time data thread (default 15, range 1-80, INI only - no
   environment override). In the 32-bit WoW64 build the key is accepted but
