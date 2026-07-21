@@ -3,8 +3,15 @@ me=pipeasio-register
 
 WINEPREFIX=${WINEPREFIX:=~/.wine}
 
+# 64-bit registration must run in a 64-bit process: on runner builds
+# (kron4ek, proton derivatives) bin/wine is the 32-bit loader, whose
+# regsvr32 cannot LoadLibrary the 64-bit pipeasio64.dll and fails with
+# status 3 (issue #9).  Prefer wine64 when it exists; plain wine is the
+# fallback (upstream builds where both are the same loader anyway).
+WINE="$(command -v wine64 || command -v wine)"
+
 if [ ! -d "${WINEPREFIX}" ]; then
-    wineboot -u || exit $?
+    wineboot -u || exit $?  # prefix bootstrap is arch-agnostic
 fi
 
 # Candidate install roots, in preference order.
@@ -44,7 +51,7 @@ cp -v --no-preserve mode "${prefix}/x86_64-windows/pipeasio64.dll" \
 
 # Let Wine find the ELF half next to the PE half.
 export WINEDLLPATH="${prefix}${WINEDLLPATH:+:${WINEDLLPATH}}"
-wine regsvr32 pipeasio64.dll
+"${WINE}" regsvr32 pipeasio64.dll
 code=$?
 
 # Optional 32-bit WoW64 registration.
@@ -55,19 +62,19 @@ if [ ${code} -eq 0 ] \
     mkdir -p "${WINEPREFIX}/drive_c/windows/syswow64" || exit $?
     cp -v --no-preserve mode "${prefix}/i386-windows/pipeasio32.dll" \
                              "${WINEPREFIX}/drive_c/windows/syswow64/" || exit $?
-    wine reg add \
+    "${WINE}" reg add \
         'HKCR\CLSID\{2D3CA9E2-1193-4C5D-B5FD-38798F3DC074}\InprocServer32' \
         /ve /t REG_SZ /d 'pipeasio32.dll' /f /reg:32 || exit $?
-    wine reg add \
+    "${WINE}" reg add \
         'HKCR\CLSID\{2D3CA9E2-1193-4C5D-B5FD-38798F3DC074}\InprocServer32' \
         /v ThreadingModel /t REG_SZ /d Apartment /f /reg:32 || exit $?
-    wine reg add \
+    "${WINE}" reg add \
         'HKCU\Software\Wine\DllOverrides' \
         /v pipeasio32 /t REG_SZ /d builtin /f /reg:32 || exit $?
-    wine reg add \
+    "${WINE}" reg add \
         'HKLM\Software\ASIO\PipeASIO' \
         /v CLSID /t REG_SZ /d '{2D3CA9E2-1193-4C5D-B5FD-38798F3DC074}' /f /reg:32 || exit $?
-    wine reg add \
+    "${WINE}" reg add \
         'HKLM\Software\ASIO\PipeASIO' \
         /v Description /t REG_SZ /d 'PipeASIO Driver' /f /reg:32 || exit $?
     >&2 echo "[${me}] 32-bit WoW64 front end registered"

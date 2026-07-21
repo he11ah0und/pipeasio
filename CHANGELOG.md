@@ -6,6 +6,15 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `pipeasio-register` failed with `regsvr32 failed (status 3)` on runner
+  builds where `bin/wine` is the 32-bit loader (kron4ek, proton
+  derivatives — the usual Bottles runners): the 32-bit `regsvr32` cannot
+  `LoadLibrary` the 64-bit `pipeasio64.dll`
+  ([#9](https://github.com/M0n7y5/pipeasio/issues/9)).  The script now
+  prefers `wine64` when it exists and falls back to `wine` otherwise.
+
 ## [1.2.3] - 2026-07-21
 
 ### Added
