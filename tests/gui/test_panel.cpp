@@ -47,6 +47,7 @@ test_config_roundtrip()
     c.sample_rate         = 96000;
     c.auto_connect        = false;
     c.follow_device_clock = true;
+    c.rt_priority         = 25;
     std::strcpy(c.output_device, "alsa_output.x");
     std::strcpy(c.input_device, "alsa_input.y");
     std::strcpy(c.node_name, "Foo");
@@ -59,6 +60,7 @@ test_config_roundtrip()
     CHECK(r.sample_rate == 96000);
     CHECK(r.auto_connect == false);
     CHECK(r.follow_device_clock == true);
+    CHECK(r.rt_priority == 25);
     CHECK(std::strcmp(r.output_device, "alsa_output.x") == 0);
     CHECK(std::strcmp(r.input_device, "alsa_input.y") == 0);
     CHECK(std::strcmp(r.node_name, "Foo") == 0);
@@ -80,6 +82,7 @@ test_cross_language()
     c.sample_rate         = 44100;
     c.auto_connect        = true;
     c.follow_device_clock = true;
+    c.rt_priority         = 30;
     std::strcpy(c.output_device, "sink.test");
     std::strcpy(c.node_name, "Bar");
     CHECK(Config::save(c)); /* writes $XDG_CONFIG_HOME/pipeasio/config.ini */
@@ -94,6 +97,7 @@ test_cross_language()
     CHECK(d.sample_rate == 44100);
     CHECK(d.auto_connect == true);
     CHECK(d.follow_device_clock == true);
+    CHECK(d.rt_priority == 30);
     CHECK(std::strcmp(d.output_device, "sink.test") == 0);
     CHECK(d.input_device[0] == '\0');
     CHECK(std::strcmp(d.node_name, "Bar") == 0);
