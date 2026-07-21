@@ -19,22 +19,31 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
 message(STATUS "Found libpipewire-0.3 ${PIPEWIRE_VERSION}")
 
-# Build identification: build_info.h is regenerated on every build when the
-# git state moves (number = commit count, hash, -dirty marker).
-add_custom_target(build_info ALL
-    ${CMAKE_COMMAND}
+# Build identification: build_info.h is regenerated on every build; the
+# generator rewrites the file only when the git state moved (number = commit
+# count, hash, -dirty marker), so dependents rebuild exactly when the id
+# moves.  Baseline at configure time so a fresh build tree compiles without
+# ordering tricks.  The .always output is never created, so the generator
+# runs on every build and samples the current git state.  The header must
+# come from a custom COMMAND (not a phony target): listed in the objects'
+# SOURCES it becomes an implicit compile input, so ninja re-stats it after
+# the run and rebuilds the dependents.  A depfile-only dependency is checked
+# once at plan time and let a mid-build regeneration leave stale or even
+# mixed-id objects in the .so (seen in practice).
+set(PIPEASIO_BUILD_INFO_H ${CMAKE_BINARY_DIR}/generated/build_info.h)
+add_custom_command(
+    OUTPUT  ${PIPEASIO_BUILD_INFO_H} ${PIPEASIO_BUILD_INFO_H}.always
+    COMMAND ${CMAKE_COMMAND}
         -DSRC=${CMAKE_SOURCE_DIR}
-        -DOUT=${CMAKE_BINARY_DIR}/generated/build_info.h
+        -DOUT=${PIPEASIO_BUILD_INFO_H}
         -P ${CMAKE_SOURCE_DIR}/cmake/GenBuildInfo.cmake
+    DEPENDS ${CMAKE_SOURCE_DIR}/cmake/GenBuildInfo.cmake
     VERBATIM)
-# Baseline at configure time so a fresh build tree compiles without ordering
-# tricks.  GenBuildInfo.cmake rewrites the header only when the content
-# changes, so dependents rebuild (via compiler depfiles) exactly when the
-# build id moves.
+add_custom_target(build_info ALL DEPENDS ${PIPEASIO_BUILD_INFO_H})
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/generated)
 execute_process(COMMAND ${CMAKE_COMMAND}
     -DSRC=${CMAKE_SOURCE_DIR}
-    -DOUT=${CMAKE_BINARY_DIR}/generated/build_info.h
+    -DOUT=${PIPEASIO_BUILD_INFO_H}
     -P ${CMAKE_SOURCE_DIR}/cmake/GenBuildInfo.cmake)
 
 include(WineDLL)
@@ -52,7 +61,7 @@ add_wine_dll(
               ${CMAKE_BINARY_DIR}/generated
     LIBS      odbc32 ole32 uuid winmm user32 pipewire-0.3
 )
-add_dependencies(pipeasio64_objs build_info)
+target_sources(pipeasio64_objs PRIVATE ${PIPEASIO_BUILD_INFO_H})
 
 # Optional 32-bit WoW64 front end.
 # - pipeasio32.dll: i386 PE stub, installed under lib/wine/i386-windows
@@ -147,7 +156,8 @@ if(BUILD_WOW64_32)
     # 64-bit unixlib hosting the real PipeWire backend.
     # -fno-lto: same winebuild ld -r / .spec export hazard as add_wine_dll (issue #6).
     add_library(pipeasio32_unix_objs OBJECT
-        src/wow64/audio_unix.c src/audio.c src/config.c)
+        src/wow64/audio_unix.c src/audio.c src/config.c
+        ${PIPEASIO_BUILD_INFO_H})
     set_target_properties(pipeasio32_unix_objs PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_include_directories(pipeasio32_unix_objs PRIVATE
         ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src/wow64
