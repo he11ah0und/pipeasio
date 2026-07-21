@@ -1,5 +1,9 @@
 /*
- * PipeWireGraph.cpp - live PipeWire graph model (see PipeWireGraph.hpp).
+ * PipeWireGraph.cpp - PipeWire adapter over GraphModel (see the .hpp).
+ *
+ * Owns the pw_thread_loop / context / registry / proxies and translates the
+ * pw callbacks into GraphModel calls.  All state and logic live in the
+ * model; everything here is plumbing.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
@@ -20,17 +24,22 @@
  */
 #include "PipeWireGraph.hpp"
 
+#include <QMetaObject>
+#include <QMutex>
+#include <QMutexLocker>
+#include <QPointer>
+#include <QTimer>
+
 #include <pipewire/pipewire.h>
 #include <pipewire/impl.h>
 #include <pipewire/extensions/profiler.h>
+#include <pipewire/keys.h>
 #include <spa/debug/types.h>
 #include <spa/param/audio/format-utils.h>
 #include <spa/param/profiler.h>
+#include <spa/pod/iter.h>
 #include <spa/pod/parser.h>
-
-#include <QMutex>
-#include <QPointer>
-#include <QTimer>
+#include <spa/utils/hook.h>
 
 namespace
 {
@@ -49,26 +58,6 @@ ensurePwInit()
     }
 }
 
-struct NodeRec
-{
-    QString name;         /* node.name */
-    QString description;  /* node.description / node.nick fallback */
-    QString mediaClass;   /* media.class */
-    QString codec;        /* api.bluez5.codec */
-    QString deviceApi;    /* device.api */
-    QString state;        /* "running" / "idle" / ... (bound nodes only) */
-    QString sampleFmt;    /* negotiated sample format, e.g. "F32P" */
-    int     rate     = 0; /* negotiated rate (bound nodes only) */
-    int     channels = 0; /* negotiated channels, else audio.channels prop */
-    bool    isPipeAsio = false;
-};
-
-struct LinkRec
-{
-    uint32_t outNode = 0;
-    uint32_t inNode  = 0;
-};
-
 QString
 nodeStateString(enum pw_node_state st)
 {
@@ -84,49 +73,23 @@ nodeStateString(enum pw_node_state st)
 }
 
 QString
-prettyBtCodec(const QString &codec)
-{
-    static const QHash<QString, QString> names = {
-        { QStringLiteral("sbc"), QStringLiteral("SBC") },
-        { QStringLiteral("sbc_xq"), QStringLiteral("SBC-XQ") },
-        { QStringLiteral("aac"), QStringLiteral("AAC") },
-        { QStringLiteral("aptx"), QStringLiteral("aptX") },
-        { QStringLiteral("aptx_hd"), QStringLiteral("aptX HD") },
-        { QStringLiteral("aptx_ll"), QStringLiteral("aptX LL") },
-        { QStringLiteral("aptx_ll_duplex"), QStringLiteral("aptX LL") },
-        { QStringLiteral("ldac"), QStringLiteral("LDAC") },
-        { QStringLiteral("lc3"), QStringLiteral("LC3") },
-        { QStringLiteral("faststream"), QStringLiteral("FastStream") },
-        { QStringLiteral("opus_05"), QStringLiteral("Opus") },
-    };
-    return names.value(codec.toLower(), codec.toUpper());
-}
-
-QString
 dictStr(const spa_dict *props, const char *key)
 {
     const char *v = props ? spa_dict_lookup(props, key) : nullptr;
     return v ? QString::fromUtf8(v) : QString();
 }
 
-/* Fill the registry-props-derived fields of rec. */
-void
-fillFromProps(NodeRec &rec, const spa_dict *props)
+/* Flatten a spa_dict into the model's plain key/value props. */
+GraphModel::Props
+propsFromDict(const spa_dict *dict)
 {
-    rec.name        = dictStr(props, PW_KEY_NODE_NAME);
-    rec.description = dictStr(props, PW_KEY_NODE_DESCRIPTION);
-    if (rec.description.isEmpty())
-        rec.description = dictStr(props, PW_KEY_NODE_NICK);
-    if (rec.description.isEmpty())
-        rec.description = rec.name;
-    rec.mediaClass = dictStr(props, PW_KEY_MEDIA_CLASS);
-    rec.codec      = dictStr(props, "api.bluez5.codec");
-    rec.deviceApi  = dictStr(props, "device.api");
-    const QString ch = dictStr(props, "audio.channels");
-    if (!ch.isEmpty())
-        rec.channels = ch.toInt();
-    const QString marker = dictStr(props, "pipeasio.node");
-    rec.isPipeAsio       = (marker == QLatin1String("1"));
+    GraphModel::Props out;
+    if (!dict)
+        return out;
+    const spa_dict_item *item;
+    spa_dict_for_each(item, dict)
+        out.insert(QString::fromUtf8(item->key), QString::fromUtf8(item->value));
+    return out;
 }
 
 } // namespace
@@ -154,18 +117,14 @@ struct PipeWireGraphImpl
     bool             syncDone = false;
     bool             running  = false;
 
-    QHash<uint32_t, NodeRec>      nodes;
-    QHash<uint32_t, LinkRec>      links;
-    QHash<uint32_t, NodeBinding *> bindings; /* bound Audio/* and own nodes */
+    GraphModel                  model;
+    QHash<uint32_t, NodeBinding *> bindings; /* every node is bound (see .hpp) */
 
     /* Profiler (pw-top's data source): one proxy to the daemon's Profiler
-     * object, latest measurement of our target node. */
+     * object. */
     pw_proxy  *profilerProxy = nullptr;
     uint32_t   profilerId    = SPA_ID_INVALID;
     spa_hook   profilerHook{};
-    PipeWireGraph::ProfilerStats prof;
-    uint32_t   profId = SPA_ID_INVALID; /* node id the prof stats belong to */
-    QString    profName;                /* manual node_name target (else marker) */
 
     void noteChanged();
 };
@@ -184,12 +143,12 @@ PipeWireGraphImpl::noteChanged()
 static void
 graph_node_info(void *data, const pw_node_info *info)
 {
-    auto    *binding = static_cast<NodeBinding *>(data);
-    NodeRec &rec     = binding->impl->nodes[binding->id];
+    auto *binding = static_cast<NodeBinding *>(data);
+    auto &model   = binding->impl->model;
 
-    rec.state = nodeStateString(info->state);
+    model.setNodeState(binding->id, nodeStateString(info->state));
     if (info->change_mask & PW_NODE_CHANGE_MASK_PROPS)
-        fillFromProps(rec, info->props);
+        model.updateNodeProps(binding->id, propsFromDict(info->props));
 
     /* (Re)read the negotiated format whenever the param set changes. */
     if (info->change_mask & PW_NODE_CHANGE_MASK_PARAMS)
@@ -216,11 +175,9 @@ graph_node_param(void *data, int /*seq*/, uint32_t id, uint32_t /*index*/, uint3
     spa_audio_info_raw raw{};
     if (spa_format_audio_raw_parse(param, &raw) < 0)
         return;
-    NodeRec &rec  = binding->impl->nodes[binding->id];
-    rec.rate      = (int)raw.rate;
-    rec.channels  = (int)raw.channels;
     const char *fmt = spa_debug_type_find_short_name(spa_type_audio_format, raw.format);
-    rec.sampleFmt = fmt ? QString::fromUtf8(fmt) : QString();
+    binding->impl->model.setNodeFormat(binding->id, (int)raw.rate, (int)raw.channels,
+                                       fmt ? QString::fromUtf8(fmt) : QString());
     binding->impl->noteChanged();
 }
 
@@ -232,23 +189,8 @@ static const pw_node_events nodeEvents = {
 
 /* --- profiler events (loop thread): per-cycle driver measurements -------- */
 
-namespace
-{
-
-/* Driver-level block of a Profiler object: clock + error counters. */
-struct DriverInfo
-{
-    int64_t  duration  = 0; /* frames per cycle (the QUANT column) */
-    uint32_t rateNum   = 0; /* sample rate (the RATE column) */
-    uint32_t rateDenom = 1;
-    uint32_t xrunCount = 0;
-    bool     haveClock = false;
-};
-
-} // namespace
-
 static void
-prof_process_info(const spa_pod *pod, DriverInfo *info)
+prof_process_info(const spa_pod *pod, GraphModel::ProfilerClock *clock)
 {
     float    load[3];
     int32_t  xruns = 0;
@@ -256,11 +198,11 @@ prof_process_info(const spa_pod *pod, DriverInfo *info)
     if (spa_pod_parse_struct(pod, SPA_POD_Long(&count), SPA_POD_Float(&load[0]),
                              SPA_POD_Float(&load[1]), SPA_POD_Float(&load[2]),
                              SPA_POD_Int(&xruns)) >= 0)
-        info->xrunCount = (uint32_t)xruns;
+        clock->xrunCount = (uint32_t)xruns;
 }
 
 static void
-prof_process_clock(const spa_pod *pod, DriverInfo *info)
+prof_process_clock(const spa_pod *pod, GraphModel::ProfilerClock *clockOut)
 {
     spa_io_clock clock;
     if (spa_pod_parse_struct(pod, SPA_POD_Int(&clock.flags), SPA_POD_Int(&clock.id),
@@ -270,50 +212,34 @@ prof_process_clock(const spa_pod *pod, DriverInfo *info)
                              SPA_POD_Long(&clock.delay), SPA_POD_Double(&clock.rate_diff),
                              SPA_POD_Long(&clock.next_nsec)) >= 0)
     {
-        info->duration  = clock.duration;
-        info->rateNum   = clock.rate.num;
-        info->rateDenom = clock.rate.denom ? clock.rate.denom : 1;
-        info->haveClock = true;
+        clockOut->duration  = clock.duration;
+        clockOut->rateNum   = clock.rate.num;
+        clockOut->rateDenom = clock.rate.denom ? clock.rate.denom : 1;
+        clockOut->haveClock = true;
     }
 }
 
 static void
-prof_process_block(PipeWireGraphImpl *impl, const spa_pod *pod, const DriverInfo &info)
+prof_process_block(PipeWireGraphImpl *impl, const spa_pod *pod)
 {
-    uint32_t            id     = 0;
-    char               *name   = nullptr;
-    int64_t             prev_signal = 0, signal = 0, awake = 0, finish = 0;
-    int32_t             status = 0;
-    struct spa_fraction latency = SPA_FRACTION(0, 1);
-    uint32_t            xruns  = (uint32_t)-1;
-    bool                async  = false;
+    GraphModel::ProfilerBlock block;
+    char                     *name   = nullptr;
+    int64_t                   prev_signal = 0, signal = 0;
+    int32_t                   status = 0;
+    struct spa_fraction       latency = SPA_FRACTION(0, 1);
+    uint32_t                  xruns  = (uint32_t)-1;
+    bool                      async  = false;
 
-    if (spa_pod_parse_struct(pod, SPA_POD_Int(&id), SPA_POD_String(&name),
+    if (spa_pod_parse_struct(pod, SPA_POD_Int(&block.id), SPA_POD_String(&name),
                              SPA_POD_Long(&prev_signal), SPA_POD_Long(&signal),
-                             SPA_POD_Long(&awake), SPA_POD_Long(&finish),
+                             SPA_POD_Long(&block.awake), SPA_POD_Long(&block.finish),
                              SPA_POD_Int(&status), SPA_POD_Fraction(&latency),
                              SPA_POD_OPT_Int(&xruns), SPA_POD_OPT_Bool(&async)) < 0)
         return;
+    block.hasXruns = xruns != (uint32_t)-1;
+    block.xruns    = block.hasXruns ? xruns : 0;
 
-    const NodeRec rec = impl->nodes.value(id);
-    const bool    isTarget
-            = rec.isPipeAsio || (!impl->profName.isEmpty() && rec.name == impl->profName);
-    if (!isTarget)
-        return;
-
-    impl->profId       = id;
-    impl->prof.found   = true;
-    impl->prof.quantum = info.haveClock ? (int)info.duration : 0;
-    /* spa_io_clock.rate is the PERIOD fraction (1/48000), so the Hz rate is
-     * its denominator; pw-top prints them as QUANT/RATE = duration/denom. */
-    impl->prof.rate    = info.haveClock ? (int)info.rateDenom : 0;
-    /* B/Q of pw-top: busy (finish - awake) over the cycle period. */
-    const double busyNs   = finish >= awake ? (double)(finish - awake) : 0.0;
-    const double periodNs = info.haveClock && info.rateDenom
-                                    ? 1e9 * (double)info.duration * info.rateNum / info.rateDenom
-                                    : 0.0;
-    impl->prof.dspLoad = periodNs > 0 ? busyNs / periodNs : 0.0;
-    impl->prof.xruns   = xruns != (uint32_t)-1 ? (long)xruns : (long)info.xrunCount;
+    impl->model.profilerBlock(block);
     impl->noteChanged();
 }
 
@@ -329,20 +255,21 @@ graph_profiler_profile(void *data, const spa_pod *pod)
         if (!spa_pod_is_object_type(o, SPA_TYPE_OBJECT_Profiler))
             continue;
 
-        DriverInfo info;
+        GraphModel::ProfilerClock clock;
         SPA_POD_OBJECT_FOREACH((struct spa_pod_object *)o, p)
         {
             switch (p->key)
             {
             case SPA_PROFILER_info:
-                prof_process_info(&p->value, &info);
+                prof_process_info(&p->value, &clock);
                 break;
             case SPA_PROFILER_clock:
-                prof_process_clock(&p->value, &info);
+                prof_process_clock(&p->value, &clock);
+                impl->model.profilerClock(clock);
                 break;
             case SPA_PROFILER_driverBlock:
             case SPA_PROFILER_followerBlock:
-                prof_process_block(impl, &p->value, info);
+                prof_process_block(impl, &p->value);
                 break;
             default:
                 break;
@@ -366,9 +293,7 @@ graph_registry_global(void *data, uint32_t id, uint32_t /*permissions*/, const c
 
     if (!strcmp(type, PW_TYPE_INTERFACE_Node))
     {
-        NodeRec rec;
-        fillFromProps(rec, props);
-        impl->nodes.insert(id, rec);
+        impl->model.addNode(id, propsFromDict(props));
 
         /* Bind EVERY node: the registry global carries only a generic prop
          * subset for client nodes (7 generic keys for our flatpak FL64), so
@@ -389,10 +314,8 @@ graph_registry_global(void *data, uint32_t id, uint32_t /*permissions*/, const c
     }
     else if (!strcmp(type, PW_TYPE_INTERFACE_Link))
     {
-        LinkRec rec;
-        rec.outNode = dictStr(props, PW_KEY_LINK_OUTPUT_NODE).toUInt();
-        rec.inNode  = dictStr(props, PW_KEY_LINK_INPUT_NODE).toUInt();
-        impl->links.insert(id, rec);
+        impl->model.addLink(id, dictStr(props, PW_KEY_LINK_OUTPUT_NODE).toUInt(),
+                            dictStr(props, PW_KEY_LINK_INPUT_NODE).toUInt());
         impl->noteChanged();
     }
     else if (!strcmp(type, PW_TYPE_INTERFACE_Profiler) && !impl->profilerProxy)
@@ -414,15 +337,13 @@ static void
 graph_registry_global_remove(void *data, uint32_t id)
 {
     auto *impl = static_cast<PipeWireGraphImpl *>(data);
-    impl->nodes.remove(id);
-    impl->links.remove(id);
+    impl->model.removeNode(id);
+    impl->model.removeLink(id);
     if (id == impl->profilerId)
     {
         pw_proxy_destroy(impl->profilerProxy);
         impl->profilerProxy = nullptr;
         impl->profilerId    = SPA_ID_INVALID;
-        impl->prof          = {};
-        impl->profId        = SPA_ID_INVALID;
     }
     if (NodeBinding *binding = impl->bindings.take(id))
     {
@@ -577,8 +498,7 @@ PipeWireGraph::stop()
         pw_core_disconnect(m_impl->core);
     m_impl->core     = nullptr;
     m_impl->registry = nullptr;
-    m_impl->nodes.clear();
-    m_impl->links.clear();
+    m_impl->model.clear();
     pw_thread_loop_unlock(m_impl->loop);
 
     pw_context_destroy(m_impl->context);
@@ -595,23 +515,8 @@ PipeWireGraph::audioDevices()
         return out;
 
     pw_thread_loop_lock(m_impl->loop);
-    for (const NodeRec &rec : m_impl->nodes)
-    {
-        Device d;
-        if (rec.mediaClass.startsWith(QLatin1String("Audio/Sink")))
-            d.isSink = true;
-        else if (rec.mediaClass.startsWith(QLatin1String("Audio/Source")))
-            d.isSink = false;
-        else
-            continue;
-        d.name        = rec.name;
-        d.description = rec.description;
-        out.append(d);
-    }
+    out = m_impl->model.audioDevices();
     pw_thread_loop_unlock(m_impl->loop);
-
-    std::sort(out.begin(), out.end(),
-              [](const Device &a, const Device &b) { return a.name < b.name; });
     return out;
 }
 
@@ -623,40 +528,9 @@ PipeWireGraph::ownNodeName()
         return out;
 
     pw_thread_loop_lock(m_impl->loop);
-    for (const NodeRec &rec : m_impl->nodes)
-        if (rec.isPipeAsio)
-        {
-            out = rec.name;
-            break;
-        }
+    out = m_impl->model.ownNodeName();
     pw_thread_loop_unlock(m_impl->loop);
     return out;
-}
-
-/* Split a peer node into a display name and a detail line (codec / negotiated
- * rate / channels+format / state), like the old describePeer() did. */
-static void
-describePeer(const NodeRec &rec, QString *name, QString *detail)
-{
-    *name = rec.description;
-
-    QStringList attrs;
-    if (!rec.codec.isEmpty())
-        attrs << prettyBtCodec(rec.codec);
-    else if (rec.deviceApi == QLatin1String("bluez5"))
-        attrs << QStringLiteral("Bluetooth");
-    if (rec.rate > 0)
-        attrs << QStringLiteral("%1 Hz").arg(rec.rate);
-    if (rec.channels > 0)
-    {
-        QString ch = QStringLiteral("%1 ch").arg(rec.channels);
-        if (!rec.sampleFmt.isEmpty())
-            ch += QLatin1Char(' ') + rec.sampleFmt;
-        attrs << ch;
-    }
-    if (!rec.state.isEmpty())
-        attrs << rec.state;
-    *detail = attrs.join(QStringLiteral(" · "));
 }
 
 PipeWireGraph::Connections
@@ -667,69 +541,9 @@ PipeWireGraph::ownConnections()
         return conn;
 
     pw_thread_loop_lock(m_impl->loop);
-
-    uint32_t ownId = SPA_ID_INVALID;
-    for (auto it = m_impl->nodes.constBegin(); it != m_impl->nodes.constEnd(); ++it)
-        if (it->isPipeAsio)
-        {
-            ownId = it.key();
-            break;
-        }
-    if (ownId != SPA_ID_INVALID)
-    {
-        /* A link FROM our node lands on a sink we play to; a link TO our node
-         * comes from a source we capture from. */
-        QList<uint32_t> outIds, inIds;
-        for (const LinkRec &link : m_impl->links)
-        {
-            if (link.outNode == ownId && m_impl->nodes.contains(link.inNode)
-                && !outIds.contains(link.inNode))
-                outIds.append(link.inNode);
-            if (link.inNode == ownId && m_impl->nodes.contains(link.outNode)
-                && !inIds.contains(link.outNode))
-                inIds.append(link.outNode);
-        }
-
-        const auto fill = [&](const QList<uint32_t> &ids, QString *name, QString *detail) {
-            if (ids.isEmpty())
-                return;
-            if (ids.size() == 1)
-            {
-                describePeer(m_impl->nodes.value(ids.first()), name, detail);
-                return;
-            }
-            QStringList names;
-            for (uint32_t id : ids)
-            {
-                QString n, d;
-                describePeer(m_impl->nodes.value(id), &n, &d);
-                names << n;
-            }
-            *name = names.join(QStringLiteral(", "));
-        };
-        fill(outIds, &conn.output, &conn.outputDetail);
-        fill(inIds, &conn.input, &conn.inputDetail);
-    }
-
+    conn = m_impl->model.ownConnections();
     pw_thread_loop_unlock(m_impl->loop);
     return conn;
-}
-
-/* pw-top's S column letter for a node state string. */
-static QString
-stateLetter(const QString &state)
-{
-    if (state == QLatin1String("running"))
-        return QStringLiteral("R");
-    if (state == QLatin1String("idle"))
-        return QStringLiteral("I");
-    if (state == QLatin1String("suspended"))
-        return QStringLiteral("S");
-    if (state == QLatin1String("error"))
-        return QStringLiteral("E");
-    if (state == QLatin1String("creating"))
-        return QStringLiteral("C");
-    return state;
 }
 
 PipeWireGraph::ProfilerStats
@@ -740,20 +554,7 @@ PipeWireGraph::profilerStats(const QString &nodeName)
         return out;
 
     pw_thread_loop_lock(m_impl->loop);
-    m_impl->profName = nodeName; /* manual target for the profile matcher */
-
-    uint32_t target = SPA_ID_INVALID;
-    for (auto it = m_impl->nodes.constBegin(); it != m_impl->nodes.constEnd(); ++it)
-        if (nodeName.isEmpty() ? it->isPipeAsio : it->name == nodeName)
-        {
-            target = it.key();
-            break;
-        }
-    if (target != SPA_ID_INVALID && target == m_impl->profId && m_impl->prof.found)
-    {
-        out       = m_impl->prof;
-        out.state = stateLetter(m_impl->nodes.value(target).state);
-    }
+    out = m_impl->model.profilerStats(nodeName);
     pw_thread_loop_unlock(m_impl->loop);
     return out;
 }

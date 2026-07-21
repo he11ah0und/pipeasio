@@ -4,9 +4,15 @@
  * Replaces the pw-dump subprocess polling: a pw_thread_loop with a registry
  * listener tracks nodes and links as they appear/change/disappear, so the
  * Monitor connections and the device combos update event-driven with zero
- * JSON parsing.  Node proxies are bound only for nodes we display (Audio/*
- * and the driver's own node), which yields their state and negotiated
- * format (rate/channels/sample format) via pw_node info/param events.
+ * JSON parsing.  EVERY node proxy is bound: the registry global carries only
+ * a generic prop subset for client nodes, so media.class and the driver's
+ * "pipeasio.node" marker are only known from the node's own info->props;
+ * binding also yields the state and the negotiated format (rate/channels/
+ * sample format) via pw_node info/param events.
+ *
+ * All classification / connection / profiler logic lives in GraphModel (no
+ * libpipewire dependency, unit-tested headless); this class is the adapter
+ * that owns the pw objects and translates their callbacks into model calls.
  *
  * Threading: all PipeWire callbacks run on the thread-loop thread.  The
  * public snapshot API locks the loop, copies out, and is therefore safe to
@@ -32,7 +38,8 @@
  */
 #pragma once
 
-#include <QHash>
+#include "GraphModel.hpp"
+
 #include <QList>
 #include <QObject>
 #include <QString>
@@ -49,37 +56,11 @@ class PipeWireGraph : public QObject
 {
     Q_OBJECT
   public:
-    struct Device
-    {
-        QString name;        /* node.name */
-        QString description; /* node.description (fallback node.nick / node.name) */
-        bool    isSink = false; /* true: Audio/Sink* (output); false: Audio/Source* */
-    };
-
-    /* What our own filter node (tagged "pipeasio.node"="1" by the driver) is
-     * wired to: the sink our outputs feed and the source feeding our inputs.
-     * Each side's *Detail carries the peer's codec/format/state second line
-     * (empty when unknown, or when several peers share a side). */
-    struct Connections
-    {
-        QString output;       /* sink name(s) our outputs feed */
-        QString outputDetail; /* codec / rate / channels / state of a single sink */
-        QString input;        /* source name(s) feeding our inputs */
-        QString inputDetail;
-    };
-
-    /* Live DSP stats for one node, from the daemon's Profiler interface
-     * (the data pw-top renders).  found == false while the node is not
-     * being measured (suspended / not driven). */
-    struct ProfilerStats
-    {
-        bool    found = false;
-        int     quantum = 0;  /* driver clock duration, frames per cycle */
-        int     rate    = 0;  /* driver clock rate, Hz */
-        double  dspLoad = 0;  /* busy time / cycle period, [0..1+] */
-        long    xruns   = 0;  /* cumulative xrun counter */
-        QString state;        /* "R" running, "I" idle, "S" suspended, "E" error */
-    };
+    /* Snapshot shapes are defined on the model so tests see the same types
+     * the panel renders. */
+    using Device        = GraphModel::Device;
+    using Connections   = GraphModel::Connections;
+    using ProfilerStats = GraphModel::ProfilerStats;
 
     explicit PipeWireGraph(QObject *parent = nullptr);
     ~PipeWireGraph() override;
