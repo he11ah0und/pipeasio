@@ -6,6 +6,17 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Distro build matrix for toolchain drift that host-only CI misses.
+  Locally, `tests/distro/run.sh` builds Fedora, Ubuntu, and Arch inside
+  distrobox with each distro's package-build CFLAGS/LDFLAGS (Fedora RPM
+  `%{optflags}` including `-flto=auto`, Ubuntu `dpkg-buildflags` with
+  `hardening=+all`, Arch `makepkg.conf`); the Fedora leg asserts `-flto`
+  is present so the issue #6 regression case stays covered. CI runs the
+  same Fedora and Ubuntu legs via `build-distros` (Arch is already covered
+  by the existing jobs).
+
 ### Fixed
 
 - Building with distro-injected LTO CFLAGS (e.g. Fedora RPM's `-flto=auto`)

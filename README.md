@@ -479,6 +479,22 @@ the full COM + real-time round trip on a 32-bit (WoW64) host:
 ./build/tests/asio_probe/run32.sh      # 32-bit WoW64 driver (needs MinGW + a 32-bit prefix)
 ```
 
+Cross-distro builds (needs [distrobox](https://distrobox.it/) plus podman or
+docker) exercise the same Release configure against each distro's injected
+package-build flags - the path that broke on Fedora's `-flto=auto` before
+`#6` was fixed:
+
+```sh
+./tests/distro/run.sh                  # fedora + ubuntu + arch
+DISTROS="fedora ubuntu" ./tests/distro/run.sh
+FRESH=1 ./tests/distro/run.sh          # recreate containers first
+./tests/distro/run.sh --clean          # remove harness containers
+```
+
+The script SKIPs (exit 77) when distrobox or a container backend is missing.
+CI runs the Fedora and Ubuntu legs on every push/PR via the `build-distros`
+matrix job.
+
 If you package PipeASIO, consider installing the `pipeasio-register` helper script
 as part of the package.
 

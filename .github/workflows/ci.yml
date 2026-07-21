@@ -46,3 +46,74 @@ jobs:
       - name: Show test log on failure
         if: failure()
         run: cat build32/Testing/Temporary/LastTest.log || true
+
+  # Distro package-build CFLAGS/LDFLAGS. Fedora is the issue #6 regression
+  # case (-flto=auto). Arch is covered by build-and-test / build-32bit.
+  build-distros:
+    name: build (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: fedora
+            image: fedora:latest
+            install: >-
+              dnf install -y --setopt=install_weak_deps=False
+              cmake ninja-build gcc g++ pkgconf
+              wine-devel pipewire-devel redhat-rpm-config git
+            # RPM optflags must expand -flto (issue #6 regression guard).
+            flags: |
+              set -euo pipefail
+              CFLAGS="$(rpm -E '%{optflags}')"
+              LDFLAGS="$(rpm -E '%{build_ldflags}')"
+              case "$CFLAGS" in
+                *-flto*) echo "LTO guard: CFLAGS contain -flto (issue #6)" ;;
+                *)
+                  echo "::error::Fedora optflags lost -flto; issue #6 guard is stale"
+                  exit 1
+                  ;;
+              esac
+              {
+                echo "CFLAGS=$CFLAGS"
+                echo "LDFLAGS=$LDFLAGS"
+              } >> "$GITHUB_ENV"
+              echo "CFLAGS=$CFLAGS"
+              echo "LDFLAGS=$LDFLAGS"
+          - name: ubuntu
+            image: ubuntu:latest
+            install: >-
+              export DEBIAN_FRONTEND=noninteractive;
+              apt-get update -qq &&
+              apt-get install -y --no-install-recommends
+              cmake ninja-build gcc g++ pkg-config
+              wine64-tools libwine-dev libpipewire-0.3-dev pipewire
+              dpkg-dev git ca-certificates
+            flags: |
+              set -euo pipefail
+              export DEB_BUILD_MAINT_OPTIONS=hardening=+all
+              CFLAGS="$(dpkg-buildflags --get CFLAGS) $(dpkg-buildflags --get CPPFLAGS)"
+              LDFLAGS="$(dpkg-buildflags --get LDFLAGS)"
+              {
+                echo "CFLAGS=$CFLAGS"
+                echo "LDFLAGS=$LDFLAGS"
+              } >> "$GITHUB_ENV"
+              echo "CFLAGS=$CFLAGS"
+              echo "LDFLAGS=$LDFLAGS"
+    steps:
+      - name: Install toolchain
+        run: ${{ matrix.install }}
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Export distro build flags
+        run: ${{ matrix.flags }}
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SETTINGS_PANEL=OFF
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Show test log on failure
+        if: failure()
+        run: cat build/Testing/Temporary/LastTest.log || true
