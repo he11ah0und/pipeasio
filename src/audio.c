@@ -335,8 +335,8 @@ struct audio_client
     /* One-entry memo for audio_find_node: registry port globals for the same
      * node arrive consecutively, so caching the last hit turns the per-port
      * O(n_nodes) lookup into O(1).  Invalidated in global_remove. */
-    uint32_t                 memo_node_id;
-    struct audio_node_info  *memo_node;
+    uint32_t                memo_node_id;
+    struct audio_node_info *memo_node;
 };
 
 struct audio_node_info
@@ -501,8 +501,8 @@ audio_open(const char *client_name, uint32_t options, uint32_t *status)
      * default.audio.sink/source values only land on the next round-trip. */
     audio_sync(c);
 
-    TRACE("audio_open(%s) -> %p (registry sync done: %u nodes, %u ports discovered)\n",
-          c->name, c, c->n_nodes, c->n_discovered);
+    TRACE("audio_open(%s) -> %p (registry sync done: %u nodes, %u ports discovered)\n", c->name, c,
+          c->n_nodes, c->n_discovered);
     return c;
 
 fail_started:
@@ -1093,7 +1093,7 @@ audio_get_ports(audio_client_t *c, const char *port_name_pattern, const char *ty
     char *names = (char *)(result + n_match + 1);
 
     uint32_t out = 0;
-    target_node    = preferred;
+    target_node  = preferred;
     for (uint32_t i = 0; i < c->n_discovered && out < n_match; i++)
     {
         audio_port_t *p = c->discovered[i];
@@ -1140,7 +1140,7 @@ audio_get_device_ports(audio_client_t *c, const char *node_name, uint64_t flags)
         return audio_get_ports(c, NULL, NULL, flags);
     }
 
-    uint32_t n = 0;
+    uint32_t n     = 0;
     size_t   arena = 0;
     for (uint32_t i = 0; i < c->n_discovered; i++)
     {
@@ -1416,7 +1416,7 @@ audio_on_process(void *userdata, struct spa_io_position *position)
          * would enable PIPEASIO_DEBUG to hunt. */
         static uint64_t cycle_count;
         static uint32_t last_quantum, last_rate;
-        const uint32_t rate = position ? (uint32_t)position->clock.rate.denom : 0u;
+        const uint32_t  rate = position ? (uint32_t)position->clock.rate.denom : 0u;
         ++cycle_count;
         if (cycle_count <= 8 || quantum != last_quantum || rate != last_rate)
             TRACE("process: cycle=%lu tid=%lx buffer_size=%u quantum=%u rate=%u/%u\n",
@@ -1645,8 +1645,8 @@ audio_cache_port(audio_client_t *c, uint32_t id, const struct spa_dict *props)
     }
     else
     {
-        n              = audio_find_node(c, node_id);
-        c->memo_node   = n;
+        n               = audio_find_node(c, node_id);
+        c->memo_node    = n;
         c->memo_node_id = n ? node_id : SPA_ID_INVALID;
     }
 

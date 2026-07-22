@@ -35,7 +35,7 @@
 
 #ifdef _WIN32
 #include <direct.h> /* _mkdir */
-#include <io.h>      /* _unlink */
+#include <io.h>     /* _unlink */
 #define cfg_mkdir(d) (_mkdir(d))
 #define cfg_unlink(f) (_unlink(f))
 #else
@@ -200,7 +200,6 @@ pipeasio_config_load(struct pipeasio_config *out)
     validate(out);
     return true;
 }
-
 
 /* The single writer for the panel's INI format; the Qt panel calls this too,
  * so the on-disk layout has exactly one implementation. */

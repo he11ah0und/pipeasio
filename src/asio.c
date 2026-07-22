@@ -1137,8 +1137,7 @@ apply_config_fields(IPipeASIOImpl *This, const struct pipeasio_config *cfg)
     This->pipeasio_rt_priority          = cfg->rt_priority;
     lstrcpynA(This->pipeasio_output_device, cfg->output_device,
               sizeof This->pipeasio_output_device);
-    lstrcpynA(This->pipeasio_input_device, cfg->input_device,
-              sizeof This->pipeasio_input_device);
+    lstrcpynA(This->pipeasio_input_device, cfg->input_device, sizeof This->pipeasio_input_device);
 }
 
 /* Commit a config staged by the watcher; recompute the forced quantum.
@@ -1715,8 +1714,8 @@ process_callback(audio_nframes_t nframes, void *arg)
         {
             audio_port_t   *port = This->output_channel[i].port;
             audio_sample_t *dst  = audio_port_get_buffer(port, nframes);
-            audio_silence(dst, audio_clamp_frames(dst, audio_port_buffer_avail_frames(port),
-                                                  nframes));
+            audio_silence(dst,
+                          audio_clamp_frames(dst, audio_port_buffer_avail_frames(port), nframes));
         }
         return 0;
     }
@@ -1727,8 +1726,8 @@ process_callback(audio_nframes_t nframes, void *arg)
         {
             audio_port_t *port = This->input_channel[i].port;
             audio_gather(&This->input_channel[i].audio_buffer[nframes * This->host_buffer_index],
-                         audio_port_get_buffer(port, nframes),
-                         audio_port_buffer_avail_frames(port), nframes);
+                         audio_port_get_buffer(port, nframes), audio_port_buffer_avail_frames(port),
+                         nframes);
         }
 
     pipeasio_host_buffer_switch(This, This->host_buffer_index, nframes,
