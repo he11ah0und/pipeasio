@@ -78,14 +78,14 @@ typedef struct cp_state
 {
     struct pipeasio_config cfg; /* values as last loaded from the file */
     uint64_t               fp;  /* config file fingerprint */
-    HWND                 combo, mode_cb;
-    HWND                 tab, native_btn, latency, detect_lbl;
-    HWND                 page1[8], page2[8]; /* controls per tab page (show/hide) */
-    int                  page1n, page2n;
-    BOOL                 dirty;         /* user edited something */
-    BOOL                 combo_dropped; /* dropdown open: don't refresh under it */
-    BOOL                 native_available; /* probe at open: panel launchable */
-    char                 cfg_path[1024];
+    HWND                   combo, mode_cb;
+    HWND                   tab, native_btn, latency, detect_lbl;
+    HWND                   page1[8], page2[8]; /* controls per tab page (show/hide) */
+    int                    page1n, page2n;
+    BOOL                   dirty;            /* user edited something */
+    BOOL                   combo_dropped;    /* dropdown open: don't refresh under it */
+    BOOL                   native_available; /* probe at open: panel launchable */
+    char                   cfg_path[1024];
 } cp_state;
 
 static uint64_t
@@ -150,9 +150,7 @@ cp_fill_controls(cp_state *st)
     SendMessageA(st->combo, CB_SETCURSEL, sel, 0);
     /* combo indices differ from mode values: 0=Free, 1=Fixed, 2=Wireless(3) */
     SendMessageA(st->mode_cb, CB_SETCURSEL,
-                 st->cfg.buffer_mode == PIPEASIO_BUFFER_MODE_WIRELESS ? 2
-                                                                     : st->cfg.buffer_mode,
-                 0);
+                 st->cfg.buffer_mode == PIPEASIO_BUFFER_MODE_WIRELESS ? 2 : st->cfg.buffer_mode, 0);
     cp_update_latency(st);
 }
 
@@ -196,7 +194,7 @@ cp_save_from_controls(cp_state *st)
 {
     struct pipeasio_config c;
     cp_config_load(&c); /* fresh base: fields we don't edit are preserved */
-    c.buffer_size         = cp_combo_value(st->combo);
+    c.buffer_size          = cp_combo_value(st->combo);
     const LRESULT mode_sel = SendMessageA(st->mode_cb, CB_GETCURSEL, 0, 0);
     c.buffer_mode          = mode_sel == 2 ? PIPEASIO_BUFFER_MODE_WIRELESS : (int)mode_sel;
     if (!pipeasio_buffer_size_valid(c.buffer_size))
@@ -359,7 +357,7 @@ cp_open_settings_panel(void)
 static void
 cp_run_dialog(void)
 {
-    static const char *cls = "PipeASIOControlPanel";
+    static const char *cls  = "PipeASIOControlPanel";
     HINSTANCE          inst = GetModuleHandleA(NULL);
     cp_state           st;
 
@@ -369,27 +367,26 @@ cp_run_dialog(void)
     st.fp = cp_config_fingerprint();
     cp_config_path_str(st.cfg_path, sizeof st.cfg_path);
 
-    WNDCLASSA wc       = { 0 };
-    wc.lpfnWndProc     = cp_wndproc;
-    wc.hInstance       = inst;
-    wc.lpszClassName   = cls;
-    wc.hbrBackground   = (HBRUSH)(COLOR_BTNFACE + 1);
+    WNDCLASSA wc     = { 0 };
+    wc.lpfnWndProc   = cp_wndproc;
+    wc.hInstance     = inst;
+    wc.lpszClassName = cls;
+    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
     RegisterClassA(&wc); /* already-registered is fine */
 
     /* W,H are the CLIENT size: convert to the outer window size (caption +
      * borders) or the bottom button row gets clipped. */
     const int W = 380, H = 230;
     RECT      want = { 0, 0, W, H };
-    AdjustWindowRectEx(&want, WS_POPUP | WS_CAPTION | WS_SYSMENU, FALSE,
-                       WS_EX_DLGMODALFRAME);
+    AdjustWindowRectEx(&want, WS_POPUP | WS_CAPTION | WS_SYSMENU, FALSE, WS_EX_DLGMODALFRAME);
     const int winW = want.right - want.left;
     const int winH = want.bottom - want.top;
     /* Own the dialog by the host's active window and center on it: ownerless
      * popup windows can map off-screen (or behind the host) under Wine, which
      * looks exactly like "button pressed, app frozen, nothing opened". */
     HWND owner = GetActiveWindow();
-    int  x = (GetSystemMetrics(SM_CXSCREEN) - winW) / 2;
-    int  y = (GetSystemMetrics(SM_CYSCREEN) - winH) / 2;
+    int  x     = (GetSystemMetrics(SM_CXSCREEN) - winW) / 2;
+    int  y     = (GetSystemMetrics(SM_CYSCREEN) - winH) / 2;
     if (owner)
     {
         RECT rc;
@@ -400,8 +397,8 @@ cp_run_dialog(void)
         }
     }
     HWND dlg = CreateWindowExA(WS_EX_DLGMODALFRAME, cls, "PipeASIO Settings",
-                               WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN, x, y,
-                               winW, winH, owner, NULL, inst, NULL);
+                               WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN, x, y, winW,
+                               winH, owner, NULL, inst, NULL);
     if (!dlg)
     {
         WARN("control panel: CreateWindowExA failed (%lu)\n", (unsigned long)GetLastError());
@@ -410,30 +407,32 @@ cp_run_dialog(void)
     SetWindowLongPtrA(dlg, GWLP_USERDATA, (LONG_PTR)&st);
 
     /* Tabs. */
-    st.tab = CreateWindowA(WC_TABCONTROL, "", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 8, 6,
-                           W - 16, 170, dlg, (HMENU)(INT_PTR)CP_IDC_TAB, inst, NULL);
-    TCITEMA tie  = { 0 };
-    tie.mask     = TCIF_TEXT;
-    tie.pszText  = (char *)"Settings";
+    st.tab = CreateWindowA(WC_TABCONTROL, "", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 8, 6, W - 16,
+                           170, dlg, (HMENU)(INT_PTR)CP_IDC_TAB, inst, NULL);
+    TCITEMA tie = { 0 };
+    tie.mask    = TCIF_TEXT;
+    tie.pszText = (char *)"Settings";
     SendMessageA(st.tab, TCM_INSERTITEMA, 0, (LPARAM)&tie);
-    tie.pszText  = (char *)"About";
+    tie.pszText = (char *)"About";
     SendMessageA(st.tab, TCM_INSERTITEMA, 1, (LPARAM)&tie);
 
     /* Page 1: Settings. */
-    CP_ADD(&st, 1, CreateWindowA("STATIC", "Buffer size:", WS_CHILD, 24, 48, 90, 18, dlg, NULL,
-                                 inst, NULL));
-    st.combo = CreateWindowA("COMBOBOX", "", WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL, 115, 45,
-                             90, 200, dlg, (HMENU)(INT_PTR)CP_IDC_BUFFER, inst, NULL);
+    CP_ADD(&st, 1,
+           CreateWindowA("STATIC", "Buffer size:", WS_CHILD, 24, 48, 90, 18, dlg, NULL, inst,
+                         NULL));
+    st.combo = CreateWindowA("COMBOBOX", "", WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL, 115, 45, 90,
+                             200, dlg, (HMENU)(INT_PTR)CP_IDC_BUFFER, inst, NULL);
     CP_ADD(&st, 1, st.combo);
     st.latency = CreateWindowA("STATIC", "", WS_CHILD, 212, 48, 150, 18, dlg, NULL, inst, NULL);
     CP_ADD(&st, 1, st.latency);
-    CP_ADD(&st, 1, CreateWindowA("STATIC", "Buffer mode:", WS_CHILD, 24, 81, 90, 18, dlg,
-                                 NULL, inst, NULL));
-    st.mode_cb = CreateWindowA("COMBOBOX", "", WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL, 115,
-                               78, 220, 140, dlg, (HMENU)(INT_PTR)CP_IDC_MODE, inst, NULL);
+    CP_ADD(&st, 1,
+           CreateWindowA("STATIC", "Buffer mode:", WS_CHILD, 24, 81, 90, 18, dlg, NULL, inst,
+                         NULL));
+    st.mode_cb = CreateWindowA("COMBOBOX", "", WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL, 115, 78,
+                               220, 140, dlg, (HMENU)(INT_PTR)CP_IDC_MODE, inst, NULL);
     CP_ADD(&st, 1, st.mode_cb);
-    static const char *modes[] = { "Free (host chooses)", "Fixed (locked to buffer size)",
-                                   NULL, "Wireless (follow device clock)" };
+    static const char *modes[] = { "Free (host chooses)", "Fixed (locked to buffer size)", NULL,
+                                   "Wireless (follow device clock)" };
     for (int i = 0; i < 4; i++)
         if (modes[i])
             SendMessageA(st.mode_cb, CB_ADDSTRING, 0, (LPARAM)modes[i]);
@@ -441,36 +440,38 @@ cp_run_dialog(void)
     /* Page 2: About. */
     char ver[128];
     snprintf(ver, sizeof ver, "PipeASIO %s (build %s)", PIPEASIO_VERSION, PIPEASIO_BUILD_ID);
-    CP_ADD(&st, 2, CreateWindowA("STATIC", ver, WS_CHILD, 24, 44, 340, 18, dlg, NULL, inst,
-                                 NULL));
-    CP_ADD(&st, 2, CreateWindowA("STATIC", "Config file:", WS_CHILD, 24, 66, 200, 14, dlg,
-                                 NULL, inst, NULL));
-    HWND path_edit = CreateWindowA("EDIT", st.cfg_path, WS_CHILD | WS_BORDER | ES_READONLY |
-                                                           ES_AUTOHSCROLL,
-                                   24, 82, 252, 20, dlg, NULL, inst, NULL);
+    CP_ADD(&st, 2, CreateWindowA("STATIC", ver, WS_CHILD, 24, 44, 340, 18, dlg, NULL, inst, NULL));
+    CP_ADD(&st, 2,
+           CreateWindowA("STATIC", "Config file:", WS_CHILD, 24, 66, 200, 14, dlg, NULL, inst,
+                         NULL));
+    HWND path_edit = CreateWindowA("EDIT", st.cfg_path,
+                                   WS_CHILD | WS_BORDER | ES_READONLY | ES_AUTOHSCROLL, 24, 82, 252,
+                                   20, dlg, NULL, inst, NULL);
     CP_ADD(&st, 2, path_edit);
-    CP_ADD(&st, 2, CreateWindowA("BUTTON", "Copy path", WS_CHILD | BS_PUSHBUTTON, 282, 80, 72,
-                                 22, dlg, (HMENU)(INT_PTR)CP_IDC_COPY, inst, NULL));
-    CP_ADD(&st, 2, CreateWindowA("STATIC", "Saved to config.ini; the driver applies it ~1 s "
-                                          "later.",
-                                 WS_CHILD, 24, 110, 340, 16, dlg, NULL, inst, NULL));
-    st.detect_lbl = CreateWindowA("STATIC", "", WS_CHILD, 24, 132, 340, 16, dlg, NULL, inst,
-                                  NULL);
+    CP_ADD(&st, 2,
+           CreateWindowA("BUTTON", "Copy path", WS_CHILD | BS_PUSHBUTTON, 282, 80, 72, 22, dlg,
+                         (HMENU)(INT_PTR)CP_IDC_COPY, inst, NULL));
+    CP_ADD(&st, 2,
+           CreateWindowA("STATIC",
+                         "Saved to config.ini; the driver applies it ~1 s "
+                         "later.",
+                         WS_CHILD, 24, 110, 340, 16, dlg, NULL, inst, NULL));
+    st.detect_lbl = CreateWindowA("STATIC", "", WS_CHILD, 24, 132, 340, 16, dlg, NULL, inst, NULL);
     CP_ADD(&st, 2, st.detect_lbl);
-    CP_ADD(&st, 2, CreateWindowA("STATIC", "Or run on the host:  pipeasio-settings",
-                                 WS_CHILD, 24, 150, 340, 16, dlg, NULL, inst, NULL));
+    CP_ADD(&st, 2,
+           CreateWindowA("STATIC", "Or run on the host:  pipeasio-settings", WS_CHILD, 24, 150, 340,
+                         16, dlg, NULL, inst, NULL));
 
     /* Bottom row (always visible). */
-    st.native_btn = CreateWindowA("BUTTON", "Native panel", WS_CHILD | BS_PUSHBUTTON, 14,
-                                  H - 44, 90, 26, dlg, (HMENU)(INT_PTR)CP_IDC_OPENPANEL, inst,
-                                  NULL);
+    st.native_btn = CreateWindowA("BUTTON", "Native panel", WS_CHILD | BS_PUSHBUTTON, 14, H - 44,
+                                  90, 26, dlg, (HMENU)(INT_PTR)CP_IDC_OPENPANEL, inst, NULL);
     /* even rhythm: 70 px buttons with 8 px gaps, 14 px right margin */
-    CreateWindowA("BUTTON", "Apply", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, W - 240, H - 44,
-                  70, 26, dlg, (HMENU)(INT_PTR)CP_IDC_APPLY, inst, NULL);
-    CreateWindowA("BUTTON", "OK", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, W - 162, H - 44,
-                  70, 26, dlg, (HMENU)(INT_PTR)CP_IDC_OK, inst, NULL);
-    CreateWindowA("BUTTON", "Cancel", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, W - 84, H - 44,
-                  70, 26, dlg, (HMENU)(INT_PTR)CP_IDC_CANCEL, inst, NULL);
+    CreateWindowA("BUTTON", "Apply", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, W - 240, H - 44, 70, 26,
+                  dlg, (HMENU)(INT_PTR)CP_IDC_APPLY, inst, NULL);
+    CreateWindowA("BUTTON", "OK", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, W - 162, H - 44, 70, 26,
+                  dlg, (HMENU)(INT_PTR)CP_IDC_OK, inst, NULL);
+    CreateWindowA("BUTTON", "Cancel", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, W - 84, H - 44, 70, 26,
+                  dlg, (HMENU)(INT_PTR)CP_IDC_CANCEL, inst, NULL);
 
     st.native_available = cp_native_panel_available();
     if (!st.native_available)
@@ -506,4 +507,3 @@ pipeasio_control_panel(void)
         return;
     cp_run_dialog();
 }
-

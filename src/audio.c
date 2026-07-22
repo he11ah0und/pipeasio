@@ -879,7 +879,6 @@ audio_set_follow_device(audio_client_t *c, bool follow)
     c->follow_device = follow;
 }
 
-
 void
 audio_set_rt_priority(audio_client_t *c, int priority)
 {

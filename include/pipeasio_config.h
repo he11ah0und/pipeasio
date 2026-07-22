@@ -65,10 +65,10 @@
  * mirrors for older readers). */
 enum
 {
-    PIPEASIO_BUFFER_MODE_FREE = 0,     /* host picks the size, quantum follows it */
-    PIPEASIO_BUFFER_MODE_FIXED = 1,    /* locked to buffer_size, quantum forced 1:1 */
+    PIPEASIO_BUFFER_MODE_FREE  = 0, /* host picks the size, quantum follows it */
+    PIPEASIO_BUFFER_MODE_FIXED = 1, /* locked to buffer_size, quantum forced 1:1 */
     /* 2 was the removed Zero-Copy experiment; invalid, falls back to FIXED */
-    PIPEASIO_BUFFER_MODE_WIRELESS = 3  /* follow the target device's quantum (BT) */
+    PIPEASIO_BUFFER_MODE_WIRELESS = 3 /* follow the target device's quantum (BT) */
 };
 #define PIPEASIO_DEFAULT_BUFFER_MODE PIPEASIO_BUFFER_MODE_FIXED
 

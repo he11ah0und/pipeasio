@@ -56,17 +56,17 @@ class SettingsDialog : public QDialog
     int      currentSampleRate() const;
 
     /* Settings widgets */
-    QSpinBox  *m_inputs            = nullptr;
-    QSpinBox  *m_outputs           = nullptr;
-    QComboBox *m_bufferSize        = nullptr;
-    QLabel    *m_latency           = nullptr;
-    QComboBox *m_sampleRate        = nullptr;
-    QComboBox *m_outputDevice      = nullptr;
-    QComboBox *m_inputDevice       = nullptr;
-    QCheckBox *m_autoConnect       = nullptr;
-    QComboBox *m_bufferMode        = nullptr;
-    QLineEdit *m_nodeName          = nullptr;
-    QSpinBox  *m_rtPriority        = nullptr;
+    QSpinBox  *m_inputs       = nullptr;
+    QSpinBox  *m_outputs      = nullptr;
+    QComboBox *m_bufferSize   = nullptr;
+    QLabel    *m_latency      = nullptr;
+    QComboBox *m_sampleRate   = nullptr;
+    QComboBox *m_outputDevice = nullptr;
+    QComboBox *m_inputDevice  = nullptr;
+    QCheckBox *m_autoConnect  = nullptr;
+    QComboBox *m_bufferMode   = nullptr;
+    QLineEdit *m_nodeName     = nullptr;
+    QSpinBox  *m_rtPriority   = nullptr;
 
     /* Monitor widgets */
     QLabel        *m_monQuantum = nullptr;

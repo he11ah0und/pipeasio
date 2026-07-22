@@ -1686,8 +1686,7 @@ process_silence(IPipeASIOImpl *This, audio_nframes_t nframes)
     {
         audio_port_t   *port = This->output_channel[i].port;
         audio_sample_t *dst  = audio_port_get_buffer(port, nframes);
-        audio_silence(dst,
-                      audio_clamp_frames(dst, audio_port_buffer_avail_frames(port), nframes));
+        audio_silence(dst, audio_clamp_frames(dst, audio_port_buffer_avail_frames(port), nframes));
     }
 }
 

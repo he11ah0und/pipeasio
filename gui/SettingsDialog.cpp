@@ -68,16 +68,15 @@ configFingerprint()
     const QFileInfo fi(Config::configPath());
     if (!fi.exists())
         return {};
-    return QStringLiteral("%1:%2")
-            .arg(fi.lastModified().toMSecsSinceEpoch())
-            .arg(fi.size());
+    return QStringLiteral("%1:%2").arg(fi.lastModified().toMSecsSinceEpoch()).arg(fi.size());
 }
 
 } // namespace
 
 SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent)
 {
-    setWindowTitle(QStringLiteral("PipeASIO Settings - " PIPEASIO_VERSION " (" PIPEASIO_BUILD_ID ")"));
+    setWindowTitle(
+            QStringLiteral("PipeASIO Settings - " PIPEASIO_VERSION " (" PIPEASIO_BUILD_ID ")"));
 
     auto *tabs = new QTabWidget(this);
     tabs->addTab(buildSettingsTab(), QStringLiteral("Settings"));
@@ -117,7 +116,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent)
     m_cfgWatch->start();
     for (QSpinBox *sb : { m_inputs, m_outputs, m_rtPriority })
         connect(sb, &QSpinBox::valueChanged, this, &SettingsDialog::markDirty);
-    for (QComboBox *cb : { m_bufferSize, m_bufferMode, m_sampleRate, m_outputDevice, m_inputDevice })
+    for (QComboBox *cb :
+         { m_bufferSize, m_bufferMode, m_sampleRate, m_outputDevice, m_inputDevice })
         connect(cb, &QComboBox::currentIndexChanged, this, &SettingsDialog::markDirty);
     for (QCheckBox *ck : { m_autoConnect })
         connect(ck, &QCheckBox::toggled, this, &SettingsDialog::markDirty);
@@ -470,14 +470,14 @@ SettingsDialog::onRestoreDefaults()
 void
 SettingsDialog::onApply()
 {
-    pipeasio_config cfg     = Config::defaults();
-    cfg.inputs              = m_inputs->value();
-    cfg.outputs             = m_outputs->value();
-    cfg.buffer_size         = currentBufferSize();
-    cfg.buffer_mode         = m_bufferMode->currentData().toInt();
-    cfg.sample_rate         = currentSampleRate();
-    cfg.auto_connect        = m_autoConnect->isChecked();
-    cfg.rt_priority         = m_rtPriority->value();
+    pipeasio_config cfg = Config::defaults();
+    cfg.inputs          = m_inputs->value();
+    cfg.outputs         = m_outputs->value();
+    cfg.buffer_size     = currentBufferSize();
+    cfg.buffer_mode     = m_bufferMode->currentData().toInt();
+    cfg.sample_rate     = currentSampleRate();
+    cfg.auto_connect    = m_autoConnect->isChecked();
+    cfg.rt_priority     = m_rtPriority->value();
 
     const QByteArray out = m_outputDevice->currentData().toString().toUtf8();
     qstrncpy(cfg.output_device, out.constData(), sizeof(cfg.output_device));
@@ -487,8 +487,8 @@ SettingsDialog::onApply()
     qstrncpy(cfg.node_name, node.constData(), sizeof(cfg.node_name));
 
     Config::save(cfg);
-    m_cfgFp  = configFingerprint(); /* our own write: don't treat as external */
-    m_dirty  = false;
+    m_cfgFp = configFingerprint(); /* our own write: don't treat as external */
+    m_dirty = false;
 }
 
 void
@@ -503,9 +503,9 @@ SettingsDialog::onCfgWatch()
 {
     const QString fp = configFingerprint();
     if (fp == m_cfgFp)
-        return;             /* unchanged */
+        return; /* unchanged */
     if (m_dirty)
-        return;             /* user's unsaved edits win; retry next tick */
+        return; /* user's unsaved edits win; retry next tick */
 
     applyConfig(Config::load());
     m_cfgFp = fp;
