@@ -29,7 +29,7 @@
 #define CHECK(expr, msg) _Static_assert((expr), msg)
 
 CHECK(sizeof(void *) == EXPECTED_POINTER_SIZE, "unexpected compiler bitness");
-CHECK(PIPEASIO_UNIX_ABI_VERSION == 2, "ABI version changed - bump both halves");
+CHECK(PIPEASIO_UNIX_ABI_VERSION == 3, "ABI version changed - bump both halves");
 CHECK(PAU_RT_MAX_PORTS == 256, "RT channel cap changed");
 CHECK(PAU_PORTS_BLOB == 16384, "port blob size changed");
 
@@ -40,7 +40,9 @@ CHECK(PAU_BIND_RT == 23, "call enum drift");
 CHECK(PAU_LOAD_CONFIG == 24, "call enum drift");
 CHECK(PAU_WAIT_CALLBACK == 26, "call enum drift");
 CHECK(PAU_REPLY_CALLBACK == 27, "call enum drift");
-CHECK(PAU_CALL_COUNT == 31, "call count drift - update both unix call tables");
+CHECK(PAU_LAUNCH_PANEL == 31, "call enum drift");
+CHECK(PAU_PANEL_AVAILABLE == 32, "call enum drift");
+CHECK(PAU_CALL_COUNT == 33, "call count drift - update both unix call tables");
 CHECK(PAU_CB_BUFFER_SWITCH == 0, "callback kind drift");
 CHECK(PAU_CB_LATENCY == 3, "callback kind drift");
 

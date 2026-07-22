@@ -14,9 +14,9 @@ follow [Semantic Versioning](https://semver.org/).
   event-driven.  The graph logic (`GraphModel`) is PipeWire-free and covered
   by headless tests that replay recorded registry/node/profiler events.
 - Editable ASIO ControlPanel: the host's control-panel button hands off to
-  the native `pipeasio-settings` when launchable (`flatpak-spawn --host` in
-  containers, `ShellExecute` on a host Wine) and falls back to a built-in
-  Win32 dialog (Settings + About tabs) otherwise.  The dialog and the Qt
+  the native `pipeasio-settings` when launchable (spawned directly by the
+  driver's unix side) and falls back to a built-in Win32 dialog (Settings +
+  About tabs) otherwise, e.g. inside bwrap sandboxes.  The dialog and the Qt
   panel watch the config and reload on external changes.
 - `buffer_mode` config key (0 Free / 1 Fixed / 3 Wireless), superseding the
   `fixed_buffer_size` / `follow_device_clock` booleans; Wireless follows the

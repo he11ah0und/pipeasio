@@ -726,6 +726,32 @@ pipeasio_wow64_config_path(char *buf, size_t n)
     return true;
 }
 
+static bool
+proxy_simple_call(unsigned call)
+{
+    pa_simple_params p;
+
+    if (!ensure_unixlib())
+        return false;
+    memset(&p, 0, sizeof p);
+    p.version = PIPEASIO_UNIX_ABI_VERSION;
+    if (UCALL(call, &p) != 0)
+        return false;
+    return p.result != 0;
+}
+
+bool
+pipeasio_wow64_launch_panel(void)
+{
+    return proxy_simple_call(PAU_LAUNCH_PANEL);
+}
+
+bool
+pipeasio_wow64_panel_available(void)
+{
+    return proxy_simple_call(PAU_PANEL_AVAILABLE);
+}
+
 uint64_t
 pipeasio_wow64_config_fingerprint(void)
 {

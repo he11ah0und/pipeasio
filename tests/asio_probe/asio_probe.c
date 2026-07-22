@@ -227,9 +227,9 @@ main(void)
 
     if (argc > 1 && !strcmp(argv[1], "controlpanel"))
     {
-        /* Manual handoff test: CP button -> flatpak-spawn / PATH handoff to
-         * the native panel, or the built-in Win32 dialog.  Give a spawned
-         * panel a moment to appear before the process exits. */
+        /* Manual handoff test: CP button -> unix-side spawn of the native
+         * panel, or the built-in Win32 dialog.  Give a spawned panel a
+         * moment to appear before the process exits. */
         LONG cprc = asio->lpVtbl->ControlPanel(asio);
         fprintf(stderr, "[probe] ControlPanel -> %ld\n", (long)cprc);
         Sleep(4000);

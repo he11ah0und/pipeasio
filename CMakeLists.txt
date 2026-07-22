@@ -56,6 +56,7 @@ add_wine_dll(
               src/config.c
               src/control_panel.c
               src/main.c
+              src/panel_launch.c
               src/regsvr.c
     INCLUDES  ${CMAKE_SOURCE_DIR}/include
               ${PIPEWIRE_INCLUDE_DIRS}
@@ -156,7 +157,7 @@ if(BUILD_WOW64_32)
     # 64-bit unixlib hosting the real PipeWire backend.
     # -fno-lto: same winebuild ld -r / .spec export hazard as add_wine_dll (issue #6).
     add_library(pipeasio32_unix_objs OBJECT
-        src/wow64/audio_unix.c src/audio.c src/config.c
+        src/wow64/audio_unix.c src/audio.c src/config.c src/panel_launch.c
         ${PIPEASIO_BUILD_INFO_H})
     set_target_properties(pipeasio32_unix_objs PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_include_directories(pipeasio32_unix_objs PRIVATE

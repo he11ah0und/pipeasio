@@ -24,7 +24,7 @@
 
 #include "pipeasio_config.h"
 
-#define PIPEASIO_UNIX_ABI_VERSION 2
+#define PIPEASIO_UNIX_ABI_VERSION 3
 
 /* Unix-side token handle.  Zero is NULL. */
 typedef uint32_t pa_handle;
@@ -70,6 +70,8 @@ enum pa_call
     PAU_SET_RT_PRIORITY,
     PAU_SAVE_CONFIG,
     PAU_CONFIG_PATH,
+    PAU_LAUNCH_PANEL,
+    PAU_PANEL_AVAILABLE,
     PAU_CALL_COUNT
 };
 
@@ -187,6 +189,14 @@ typedef struct
     pa_handle client;
     char      name[PAU_PORTNAME_MAX]; /* out */
 } pa_name_params;
+
+/* PAU_LAUNCH_PANEL: the unixlib spawns the native settings panel itself
+ * (the panel next to the driver's prefix, then the host bin staples);
+ * pa_simple_params.result = launched.  Spawning unix-side avoids the
+ * DOS-translation problem entirely: bare names do not resolve (no Unix
+ * PATH import in the session) and a prefix may have no drive letter for
+ * '/' at all (Bottles ships without Z:).  PAU_PANEL_AVAILABLE: same
+ * locations, existence probe only. */
 
 /* PAU_LOAD_CONFIG: pipeasio_config_load(&cfg) -> found. */
 typedef struct

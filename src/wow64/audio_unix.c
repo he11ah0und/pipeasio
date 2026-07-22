@@ -37,6 +37,7 @@
 #include <time.h>
 
 #include "audio.h"
+#include "panel_launch.h"
 #include "pipeasio_config.h"
 #include "pipeasio_offsets.h"
 #include "pipeasio_unix_abi.h"
@@ -873,6 +874,26 @@ wow64_config_path(void *args)
 }
 
 static NTSTATUS
+wow64_launch_panel(void *args)
+{
+    pa_simple_params *p = args;
+
+    PAU_CHECK(p);
+    p->result = panel_launch_try();
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS
+wow64_panel_available(void *args)
+{
+    pa_simple_params *p = args;
+
+    PAU_CHECK(p);
+    p->result = panel_launch_available();
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS
 wow64_config_fingerprint(void *args)
 {
     pa_fingerprint_params *p = args;
@@ -1002,7 +1023,9 @@ wow64_set_rt_priority(void *args)
     X(wow64_reply_callback)                                                                        \
     X(wow64_set_rt_priority)                                                                       \
     X(wow64_save_config)                                                                           \
-    X(wow64_config_path)
+    X(wow64_config_path)                                                                           \
+    X(wow64_launch_panel)                                                                          \
+    X(wow64_panel_available)
 
 #define PAU_TABLE_ENTRY(name) name,
 

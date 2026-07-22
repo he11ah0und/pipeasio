@@ -41,6 +41,13 @@ extern "C"
      * pipeasio_config_path. */
     bool pipeasio_wow64_config_path(char *buf, size_t n);
 
+    /* Asks the unixlib to spawn the native settings panel; false = nothing
+     * launchable, show the built-in dialog. */
+    bool pipeasio_wow64_launch_panel(void);
+
+    /* Existence probe for the About tab's "native panel" indicator. */
+    bool pipeasio_wow64_panel_available(void);
+
     /* Live-reload fingerprint.  Zero means no config file. */
     uint64_t pipeasio_wow64_config_fingerprint(void);
 

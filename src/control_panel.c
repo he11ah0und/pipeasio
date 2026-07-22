@@ -2,10 +2,13 @@
  * control_panel.c - the ASIO ControlPanel dialog.
  *
  * Entry point: pipeasio_control_panel().  First tries to hand off to the
- * native pipeasio-settings panel (flatpak-spawn --host in containers, plain
- * ShellExecute on a host Wine); falls back to a built-in Win32 dialog with
- * Settings (buffer size + latency, fixed buffer size, follow device clock)
- * and About (version, config path + copy, native-panel detection) tabs.
+ * native pipeasio-settings panel, spawned by the unix side directly (the
+ * installed panel; ShellExecute cannot do this: no Unix PATH import in
+ * the session, and a prefix may have no drive letter for '/' at all).
+ * Where the panel is not reachable - e.g. bwrap sandboxes like Flatpak
+ * Bottles - a built-in Win32 dialog opens instead, with Settings (buffer
+ * size + latency, buffer mode) and About (version, config path + copy,
+ * native-panel detection) tabs.
  * The dialog watches config.ini and refreshes on external changes unless
  * the user has unsaved edits.
  *
@@ -35,6 +38,7 @@
 #ifdef PIPEASIO_WOW64_PE
 #include "pipeasio_wow64_pe.h"
 #else
+#include "panel_launch.h"
 #include <sys/stat.h>
 #endif
 
@@ -42,7 +46,6 @@
 #include <windows.h>
 #include <winuser.h>
 #include <wingdi.h>
-#include <shellapi.h>
 #include <commctrl.h>
 
 #include <stdio.h>
@@ -51,11 +54,11 @@
 #include <string.h>
 
 /* --- ASIO ControlPanel ------------------------------------------------------
- * First tries to launch the native pipeasio-settings panel (reachable only
- * when the driver runs on a host Wine that has it in PATH - not inside
- * Flatpak/Bottles).  Falls back to a small built-in Win32 dialog editing
- * buffer_size / fixed_buffer_size / follow_device_clock directly in
- * config.ini; the driver's config watcher applies the change ~1 s later.
+ * First tries to launch the native pipeasio-settings panel (installed next
+ * to the driver's prefix or in the host bin dirs; unreachable inside
+ * bwrap sandboxes).  Falls back to a small built-in Win32 dialog editing
+ * buffer_size / buffer_mode directly in config.ini; the driver's config
+ * watcher applies the change ~1 s later.
  * The dialog also watches the file and refreshes on external changes
  * (settings panel or an editor), unless the user has unsaved edits. */
 
@@ -325,71 +328,28 @@ cp_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 static BOOL
 cp_native_panel_available(void)
 {
-    /* Flatpak container: does the portal allow spawning on the host?
-     * (needs flatpak override --user <app> --talk-name=org.freedesktop.Flatpak) */
-    SHELLEXECUTEINFOA sei = { 0 };
-    sei.cbSize            = sizeof sei;
-    sei.lpFile            = "flatpak-spawn";
-    sei.lpParameters      = "--host true";
-    sei.nShow             = SW_HIDE;
-    sei.fMask             = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
-    if (ShellExecuteExA(&sei) && sei.hProcess)
-    {
-        DWORD code = 1;
-        WaitForSingleObject(sei.hProcess, 3000);
-        GetExitCodeProcess(sei.hProcess, &code);
-        CloseHandle(sei.hProcess);
-        if (code == 0)
-            return TRUE;
-    }
-    /* Host Wine: the panel binary is directly in PATH. */
-    char buf[MAX_PATH];
-    return SearchPathA(NULL, "pipeasio-settings", NULL, sizeof buf, buf, NULL) != 0;
-}
-
-/* Launch `file args` and verify the process survives the first moments:
- * ShellExecute's return code only means "spawn accepted"; a found-but-broken
- * binary (or a portal rejection) must not suppress the fallback dialog. */
-static BOOL
-cp_try_launch(const char *file, const char *args)
-{
-    SHELLEXECUTEINFOA sei = { 0 };
-    sei.cbSize            = sizeof sei;
-    sei.lpFile            = file;
-    sei.lpParameters      = args;
-    sei.nShow             = SW_SHOWNORMAL;
-    /* FLAG_NO_UI: failure must fall to the next candidate / built-in dialog,
-     * not to ShellExecute's own "File not found" message box. */
-    sei.fMask             = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
-    if (!ShellExecuteExA(&sei))
-        return FALSE;
-    if (sei.hProcess)
-    {
-        DWORD code = 0;
-        WaitForSingleObject(sei.hProcess, 800);
-        GetExitCodeProcess(sei.hProcess, &code);
-        CloseHandle(sei.hProcess);
-        if (code != STILL_ACTIVE)
-            return FALSE;
-    }
-    return TRUE;
+#ifdef PIPEASIO_WOW64_PE
+    return pipeasio_wow64_panel_available();
+#else
+    return panel_launch_available();
+#endif
 }
 
 /* Try to launch the native settings panel; true when it actually started. */
 static BOOL
 cp_open_settings_panel(void)
 {
-    /* Flatpak container: launch the host panel through the portal (needs
-     * `flatpak override --user <app> --talk-name=org.freedesktop.Flatpak`). */
-    if (cp_try_launch("flatpak-spawn", "--host pipeasio-settings"))
+    /* The unixlib spawns the panel itself (next to the driver's prefix, or
+     * the host bin staples): ShellExecute cannot do it - bare names do not
+     * resolve (no Unix PATH import in the session) and a prefix may have no
+     * drive letter for '/' at all (Bottles ships without Z:). */
+#ifdef PIPEASIO_WOW64_PE
+    if (pipeasio_wow64_launch_panel())
+#else
+    if (panel_launch_try())
+#endif
     {
-        TRACE("control panel: handed off via flatpak-spawn --host\n");
-        return TRUE;
-    }
-    /* Host Wine: the panel is directly in PATH. */
-    if (cp_try_launch("pipeasio-settings", NULL))
-    {
-        TRACE("control panel: handed off to pipeasio-settings\n");
+        TRACE("control panel: handed off to the native panel\n");
         return TRUE;
     }
     TRACE("control panel: no native panel reachable, built-in dialog\n");
