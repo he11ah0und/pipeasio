@@ -42,8 +42,8 @@ class GraphModel
 
     struct Device
     {
-        QString name;        /* node.name */
-        QString description; /* node.description (fallback node.nick / node.name) */
+        QString name;           /* node.name */
+        QString description;    /* node.description (fallback node.nick / node.name) */
         bool    isSink = false; /* true: Audio/Sink* (output); false: Audio/Source* */
     };
 
@@ -64,12 +64,12 @@ class GraphModel
      * being measured (suspended / not driven). */
     struct ProfilerStats
     {
-        bool    found = false;
-        int     quantum = 0;  /* driver clock duration, frames per cycle */
-        int     rate    = 0;  /* driver clock rate, Hz */
-        double  dspLoad = 0;  /* busy time / cycle period, [0..1+] */
-        long    xruns   = 0;  /* cumulative xrun counter */
-        QString state;        /* "R" running, "I" idle, "S" suspended, "E" error */
+        bool    found   = false;
+        int     quantum = 0; /* driver clock duration, frames per cycle */
+        int     rate    = 0; /* driver clock rate, Hz */
+        double  dspLoad = 0; /* busy time / cycle period, [0..1+] */
+        long    xruns   = 0; /* cumulative xrun counter */
+        QString state;       /* "R" running, "I" idle, "S" suspended, "E" error */
     };
 
     /* Parsed driver-level Profiler block: the cycle clock + error counters. */
@@ -119,15 +119,15 @@ class GraphModel
   private:
     struct NodeRec
     {
-        QString name;        /* node.name */
-        QString description; /* node.description / node.nick fallback */
-        QString mediaClass;  /* media.class */
-        QString codec;       /* api.bluez5.codec */
-        QString deviceApi;   /* device.api */
-        QString state;       /* "running" / "idle" / ... (bound nodes only) */
-        QString sampleFmt;   /* negotiated sample format, e.g. "F32P" */
-        int     rate     = 0; /* negotiated rate (bound nodes only) */
-        int     channels = 0; /* negotiated channels, else audio.channels prop */
+        QString name;           /* node.name */
+        QString description;    /* node.description / node.nick fallback */
+        QString mediaClass;     /* media.class */
+        QString codec;          /* api.bluez5.codec */
+        QString deviceApi;      /* device.api */
+        QString state;          /* "running" / "idle" / ... (bound nodes only) */
+        QString sampleFmt;      /* negotiated sample format, e.g. "F32P" */
+        int     rate       = 0; /* negotiated rate (bound nodes only) */
+        int     channels   = 0; /* negotiated channels, else audio.channels prop */
         bool    isPipeAsio = false;
     };
 

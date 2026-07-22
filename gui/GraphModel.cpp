@@ -72,9 +72,9 @@ GraphModel::applyProps(NodeRec &rec, const Props &props) const
         rec.description = props.value(QStringLiteral("node.nick"));
     if (rec.description.isEmpty())
         rec.description = rec.name;
-    rec.mediaClass = props.value(QStringLiteral("media.class"));
-    rec.codec      = props.value(QStringLiteral("api.bluez5.codec"));
-    rec.deviceApi  = props.value(QStringLiteral("device.api"));
+    rec.mediaClass   = props.value(QStringLiteral("media.class"));
+    rec.codec        = props.value(QStringLiteral("api.bluez5.codec"));
+    rec.deviceApi    = props.value(QStringLiteral("device.api"));
     const QString ch = props.value(QStringLiteral("audio.channels"));
     if (!ch.isEmpty())
         rec.channels = ch.toInt();
@@ -138,9 +138,9 @@ GraphModel::clear()
 {
     m_nodes.clear();
     m_links.clear();
-    m_clock    = {};
-    m_prof     = {};
-    m_profId   = ~0u;
+    m_clock  = {};
+    m_prof   = {};
+    m_profId = ~0u;
     m_profName.clear();
 }
 
@@ -195,15 +195,14 @@ GraphModel::ownConnections() const
     QList<uint32_t> outIds, inIds;
     for (const LinkRec &link : m_links)
     {
-        if (link.outNode == ownId && m_nodes.contains(link.inNode)
-            && !outIds.contains(link.inNode))
+        if (link.outNode == ownId && m_nodes.contains(link.inNode) && !outIds.contains(link.inNode))
             outIds.append(link.inNode);
-        if (link.inNode == ownId && m_nodes.contains(link.outNode)
-            && !inIds.contains(link.outNode))
+        if (link.inNode == ownId && m_nodes.contains(link.outNode) && !inIds.contains(link.outNode))
             inIds.append(link.outNode);
     }
 
-    const auto describe = [](const NodeRec &rec, QString *name, QString *detail) {
+    const auto describe = [](const NodeRec &rec, QString *name, QString *detail)
+    {
         *name = rec.description;
         QStringList attrs;
         if (!rec.codec.isEmpty())
@@ -224,7 +223,8 @@ GraphModel::ownConnections() const
         *detail = attrs.join(QStringLiteral(" · "));
     };
 
-    const auto fill = [&](const QList<uint32_t> &ids, QString *name, QString *detail) {
+    const auto fill = [&](const QList<uint32_t> &ids, QString *name, QString *detail)
+    {
         if (ids.isEmpty())
             return;
         if (ids.size() == 1)
@@ -255,9 +255,8 @@ GraphModel::profilerClock(const ProfilerClock &clock)
 void
 GraphModel::profilerBlock(const ProfilerBlock &block)
 {
-    const NodeRec rec = m_nodes.value(block.id);
-    const bool    isTarget
-            = rec.isPipeAsio || (!m_profName.isEmpty() && rec.name == m_profName);
+    const NodeRec rec      = m_nodes.value(block.id);
+    const bool    isTarget = rec.isPipeAsio || (!m_profName.isEmpty() && rec.name == m_profName);
     if (!isTarget)
         return;
 
@@ -266,14 +265,13 @@ GraphModel::profilerBlock(const ProfilerBlock &block)
     m_prof.quantum = m_clock.haveClock ? (int)m_clock.duration : 0;
     /* The clock rate is the PERIOD fraction (1/48000), so the Hz rate is its
      * denominator; pw-top prints QUANT/RATE = duration/denom. */
-    m_prof.rate    = m_clock.haveClock ? (int)m_clock.rateDenom : 0;
+    m_prof.rate = m_clock.haveClock ? (int)m_clock.rateDenom : 0;
     /* B/Q of pw-top: busy (finish - awake) over the cycle period. */
-    const double busyNs   = block.finish >= block.awake ? (double)(block.finish - block.awake)
-                                                        : 0.0;
-    const double periodNs = m_clock.haveClock && m_clock.rateDenom
-                                    ? 1e9 * (double)m_clock.duration * m_clock.rateNum
-                                              / m_clock.rateDenom
-                                    : 0.0;
+    const double busyNs = block.finish >= block.awake ? (double)(block.finish - block.awake) : 0.0;
+    const double periodNs
+            = m_clock.haveClock && m_clock.rateDenom
+                      ? 1e9 * (double)m_clock.duration * m_clock.rateNum / m_clock.rateDenom
+                      : 0.0;
     m_prof.dspLoad = periodNs > 0 ? busyNs / periodNs : 0.0;
     m_prof.xruns   = block.hasXruns ? (long)block.xruns : (long)m_clock.xrunCount;
 }

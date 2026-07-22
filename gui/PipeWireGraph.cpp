@@ -63,11 +63,16 @@ nodeStateString(enum pw_node_state st)
 {
     switch (st)
     {
-    case PW_NODE_STATE_ERROR: return QStringLiteral("error");
-    case PW_NODE_STATE_CREATING: return QStringLiteral("creating");
-    case PW_NODE_STATE_SUSPENDED: return QStringLiteral("suspended");
-    case PW_NODE_STATE_IDLE: return QStringLiteral("idle");
-    case PW_NODE_STATE_RUNNING: return QStringLiteral("running");
+    case PW_NODE_STATE_ERROR:
+        return QStringLiteral("error");
+    case PW_NODE_STATE_CREATING:
+        return QStringLiteral("creating");
+    case PW_NODE_STATE_SUSPENDED:
+        return QStringLiteral("suspended");
+    case PW_NODE_STATE_IDLE:
+        return QStringLiteral("idle");
+    case PW_NODE_STATE_RUNNING:
+        return QStringLiteral("running");
     }
     return {};
 }
@@ -88,7 +93,7 @@ propsFromDict(const spa_dict *dict)
         return out;
     const spa_dict_item *item;
     spa_dict_for_each(item, dict)
-        out.insert(QString::fromUtf8(item->key), QString::fromUtf8(item->value));
+            out.insert(QString::fromUtf8(item->key), QString::fromUtf8(item->value));
     return out;
 }
 
@@ -99,32 +104,32 @@ propsFromDict(const spa_dict *dict)
 struct NodeBinding
 {
     PipeWireGraphImpl *impl;
-    uint32_t             id;
-    pw_proxy           *proxy;
-    spa_hook             listener{};
+    uint32_t           id;
+    pw_proxy          *proxy;
+    spa_hook           listener{};
 };
 
 struct PipeWireGraphImpl
 {
-    PipeWireGraph   *q;
-    pw_thread_loop  *loop     = nullptr;
-    pw_context      *context  = nullptr;
-    pw_core         *core     = nullptr;
-    pw_registry     *registry = nullptr;
-    spa_hook         registryListener{};
-    spa_hook         coreListener{};
-    int              syncSeq  = 0;
-    bool             syncDone = false;
-    bool             running  = false;
+    PipeWireGraph  *q;
+    pw_thread_loop *loop     = nullptr;
+    pw_context     *context  = nullptr;
+    pw_core        *core     = nullptr;
+    pw_registry    *registry = nullptr;
+    spa_hook        registryListener{};
+    spa_hook        coreListener{};
+    int             syncSeq  = 0;
+    bool            syncDone = false;
+    bool            running  = false;
 
-    GraphModel                  model;
+    GraphModel                     model;
     QHash<uint32_t, NodeBinding *> bindings; /* every node is bound (see .hpp) */
 
     /* Profiler (pw-top's data source): one proxy to the daemon's Profiler
      * object. */
-    pw_proxy  *profilerProxy = nullptr;
-    uint32_t   profilerId    = SPA_ID_INVALID;
-    spa_hook   profilerHook{};
+    pw_proxy *profilerProxy = nullptr;
+    uint32_t  profilerId    = SPA_ID_INVALID;
+    spa_hook  profilerHook{};
 
     void noteChanged();
 };
@@ -135,7 +140,13 @@ PipeWireGraphImpl::noteChanged()
 {
     QPointer<PipeWireGraph> guard(q);
     QMetaObject::invokeMethod(
-            q, [guard]() { if (guard) guard->kickCoalesce(); }, Qt::QueuedConnection);
+            q,
+            [guard]()
+            {
+                if (guard)
+                    guard->kickCoalesce();
+            },
+            Qt::QueuedConnection);
 }
 
 /* --- node proxy events (loop thread) ------------------------------------- */
@@ -182,9 +193,9 @@ graph_node_param(void *data, int /*seq*/, uint32_t id, uint32_t /*index*/, uint3
 }
 
 static const pw_node_events nodeEvents = {
-        .version = PW_VERSION_NODE_EVENTS,
-        .info    = graph_node_info,
-        .param   = graph_node_param,
+    .version = PW_VERSION_NODE_EVENTS,
+    .info    = graph_node_info,
+    .param   = graph_node_param,
 };
 
 /* --- profiler events (loop thread): per-cycle driver measurements -------- */
@@ -192,12 +203,12 @@ static const pw_node_events nodeEvents = {
 static void
 prof_process_info(const spa_pod *pod, GraphModel::ProfilerClock *clock)
 {
-    float    load[3];
-    int32_t  xruns = 0;
-    int64_t  count = 0;
+    float   load[3];
+    int32_t xruns = 0;
+    int64_t count = 0;
     if (spa_pod_parse_struct(pod, SPA_POD_Long(&count), SPA_POD_Float(&load[0]),
-                             SPA_POD_Float(&load[1]), SPA_POD_Float(&load[2]),
-                             SPA_POD_Int(&xruns)) >= 0)
+                             SPA_POD_Float(&load[1]), SPA_POD_Float(&load[2]), SPA_POD_Int(&xruns))
+        >= 0)
         clock->xrunCount = (uint32_t)xruns;
 }
 
@@ -210,7 +221,8 @@ prof_process_clock(const spa_pod *pod, GraphModel::ProfilerClock *clockOut)
                              SPA_POD_Long(&clock.nsec), SPA_POD_Fraction(&clock.rate),
                              SPA_POD_Long(&clock.position), SPA_POD_Long(&clock.duration),
                              SPA_POD_Long(&clock.delay), SPA_POD_Double(&clock.rate_diff),
-                             SPA_POD_Long(&clock.next_nsec)) >= 0)
+                             SPA_POD_Long(&clock.next_nsec))
+        >= 0)
     {
         clockOut->duration  = clock.duration;
         clockOut->rateNum   = clock.rate.num;
@@ -223,18 +235,19 @@ static void
 prof_process_block(PipeWireGraphImpl *impl, const spa_pod *pod)
 {
     GraphModel::ProfilerBlock block;
-    char                     *name   = nullptr;
+    char                     *name        = nullptr;
     int64_t                   prev_signal = 0, signal = 0;
-    int32_t                   status = 0;
+    int32_t                   status  = 0;
     struct spa_fraction       latency = SPA_FRACTION(0, 1);
-    uint32_t                  xruns  = (uint32_t)-1;
-    bool                      async  = false;
+    uint32_t                  xruns   = (uint32_t)-1;
+    bool                      async   = false;
 
     if (spa_pod_parse_struct(pod, SPA_POD_Int(&block.id), SPA_POD_String(&name),
                              SPA_POD_Long(&prev_signal), SPA_POD_Long(&signal),
                              SPA_POD_Long(&block.awake), SPA_POD_Long(&block.finish),
                              SPA_POD_Int(&status), SPA_POD_Fraction(&latency),
-                             SPA_POD_OPT_Int(&xruns), SPA_POD_OPT_Bool(&async)) < 0)
+                             SPA_POD_OPT_Int(&xruns), SPA_POD_OPT_Bool(&async))
+        < 0)
         return;
     block.hasXruns = xruns != (uint32_t)-1;
     block.xruns    = block.hasXruns ? xruns : 0;
@@ -246,8 +259,8 @@ prof_process_block(PipeWireGraphImpl *impl, const spa_pod *pod)
 static void
 graph_profiler_profile(void *data, const spa_pod *pod)
 {
-    auto               *impl = static_cast<PipeWireGraphImpl *>(data);
-    struct spa_pod     *o;
+    auto                *impl = static_cast<PipeWireGraphImpl *>(data);
+    struct spa_pod      *o;
     struct spa_pod_prop *p;
 
     SPA_POD_STRUCT_FOREACH(pod, o)
@@ -279,8 +292,8 @@ graph_profiler_profile(void *data, const spa_pod *pod)
 }
 
 static const pw_profiler_events profilerEvents = {
-        PW_VERSION_PROFILER_EVENTS,
-        graph_profiler_profile,
+    PW_VERSION_PROFILER_EVENTS,
+    graph_profiler_profile,
 };
 
 /* --- registry events (loop thread) --------------------------------------- */
@@ -301,8 +314,7 @@ graph_registry_global(void *data, uint32_t id, uint32_t /*permissions*/, const c
          * from the node's own info->props.  Binding also brings the state and
          * the negotiated format.  (pw-dump does the same per dump.) */
         auto *proxy = static_cast<pw_proxy *>(
-                pw_registry_bind(impl->registry, id, PW_TYPE_INTERFACE_Node,
-                                 PW_VERSION_NODE, 0));
+                pw_registry_bind(impl->registry, id, PW_TYPE_INTERFACE_Node, PW_VERSION_NODE, 0));
         if (proxy)
         {
             auto *binding = new NodeBinding{ impl, id, proxy, {} };
@@ -354,9 +366,9 @@ graph_registry_global_remove(void *data, uint32_t id)
 }
 
 static const pw_registry_events registryEvents = {
-        .version        = PW_VERSION_REGISTRY_EVENTS,
-        .global         = graph_registry_global,
-        .global_remove  = graph_registry_global_remove,
+    .version       = PW_VERSION_REGISTRY_EVENTS,
+    .global        = graph_registry_global,
+    .global_remove = graph_registry_global_remove,
 };
 
 /* --- core events: initial registry roundtrip ------------------------------ */
@@ -373,8 +385,8 @@ graph_core_done(void *data, uint32_t id, int seq)
 }
 
 static const pw_core_events coreEvents = {
-        .version = PW_VERSION_CORE_EVENTS,
-        .done    = graph_core_done,
+    .version = PW_VERSION_CORE_EVENTS,
+    .done    = graph_core_done,
 };
 
 /* --- public API ------------------------------------------------------------ */
@@ -441,10 +453,9 @@ PipeWireGraph::start()
     if (m_impl->core)
     {
         m_impl->registry = pw_core_get_registry(m_impl->core, PW_VERSION_REGISTRY, 0);
-        pw_registry_add_listener(m_impl->registry, &m_impl->registryListener,
-                                 &registryEvents, m_impl);
-        pw_core_add_listener(m_impl->core, &m_impl->coreListener, &coreEvents,
-                             m_impl);
+        pw_registry_add_listener(m_impl->registry, &m_impl->registryListener, &registryEvents,
+                                 m_impl);
+        pw_core_add_listener(m_impl->core, &m_impl->coreListener, &coreEvents, m_impl);
         m_impl->running = true;
 
         /* Wait (bounded) for the initial registry fill so early callers like
